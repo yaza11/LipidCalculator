@@ -1,0 +1,7 @@
+.venv/
+
+.idea/
+
+dists/
+build/
+LipidCalculator.egg-info/
