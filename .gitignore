@@ -5,4 +5,10 @@
 dists/
 build/
 LipidCalculator.egg-info/
+
 testing/
+Groups/testing/
+test_cfm_id/
+
+loss_db.csv
+fragment_db.csv
