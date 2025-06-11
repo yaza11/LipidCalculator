@@ -1,0 +1,211 @@
+{
+  "group": "Intact Polar Lipids",
+  "functional groups": [
+    {
+      "abbreviation": "OH",
+      "name": "hydroxy",
+      "SMILES": "[Fr]O[H]"
+    },
+    {
+      "abbreviation": "P",
+      "name": "phosphate",
+      "SMILES": "O[P](O)([Fr])=O"
+    }
+  ],
+  "head groups": [
+    {
+      "abbreviation": "1G",
+      "name": "Monoglycosidic",
+      "SMILES": "C(O[H])1C(CO[H])OC([Fr])C(O[H])C1O[H]"
+    },
+    {
+      "abbreviation": "2G",
+      "name": "Diglycosidic",
+      "SMILES": "C(O[H])1C(COC2OC(CO[H])C(O[H])C(O[H])C2O[H])OC([Fr])C(O[H])C1O[H]"
+    },
+    {
+      "abbreviation": "3G",
+      "name": "Triglycosidic",
+      "SMILES": "C(O[H])1C(COC2OC(COC3OC(CO[H])C(O[H])C(O[H])C3O[H])C(O[H])C(O[H])C2O[H])OC([Fr])C(O[H])C1O[H]"
+    },
+    {
+      "abbreviation": "PC",
+      "name": "phosphatidylcholine Head group",
+      "SMILES": "C[N+](C)(C)CCO[P]([O-])([Fr])=O",
+      "formula": "",
+      "notes": "glycerol forms bond to P atom ",
+      "doi": "https://doi.org/10.1016/j.soilbio.2020.108045",
+      "tags": [
+        "IPL",
+        "functional group"
+      ]
+    },
+    {
+      "abbreviation": "PDME",
+      "name": "Phosphatidyl-(N,N)-dimethylethanolamine",
+      "SMILES": "N(C)(C)CCOP([Fr])(O[H])=O"
+    },
+    {
+      "abbreviation": "PME",
+      "name": "Phosphatidyl-(N) methylethanolamine",
+      "SMILES": "N(C)([H])CCOP([Fr])(O[H])=O"
+    },
+    {
+      "abbreviation": "PG",
+      "name": "Phosphatidylglycerol",
+      "SMILES": "OCC(O)CO[P](O)([Fr])=O"
+    },
+    {
+      "abbreviation": "PS",
+      "name": "Phosphatidylserine",
+      "SMILES": "NC(CO[P](O)(=O)O[Fr])C(O)O"
+    },
+    {
+      "abbreviation": "PE",
+      "name": "Phosphatidylethanolamine",
+      "SMILES": "NCCO[P](O)(=O)O[Fr]"
+    },
+    {
+      "abbreviation": "PI",
+      "name": "Phosphatidylinositol",
+      "SMILES": "C(O[H])1C(O[H])C(O[H])C(OP([Fr])(O)=O)C(O[H])C1O[H]"
+    },
+    {
+      "abbreviation": "DPG",
+      "name": "Diphosphatidylglycerol",
+      "SMILES": "P(O[H])(O[Fr])(=O)OCC(O)COP([Fr])(=O)O[H]"
+    },
+    {
+      "abbreviation": "MMPE",
+      "name": "phosphatidyl-(N)-methylethanolamine Head group",
+      "SMILES": "C[NH2+]CCOP([O-])([Fr])=O",
+      "notes": "glycerol forms bond with P atom ",
+      "doi": "https://doi.org/10.1016/j.soilbio.2020.108045",
+      "tags": [
+        "IPL",
+        "functional group",
+        "phospholipid"
+      ]
+    },
+    {
+      "abbreviation": "SQ",
+      "name": "Sulfoquinovosyl",
+      "SMILES": "C(O[H])1C(O[H])C(O[H])C([Fr])OC1CS(=O)(=O)O[H]"
+    }
+  ],
+  "core lipids": [
+    {
+      "abbreviation": "DGTS",
+      "name": "Diacylglyceryl trimethylhomoserine",
+      "SMILES": "C[N+](C)(C(C(=O)[O-])CCOCC(OC(=O)[Cs])COC(=O)[Rb])C"
+    },
+    {
+      "abbreviation": "BL",
+      "name": "Betaine lipid",
+      "SMILES": "C[N+](C)(C(C(=O)[O-])CCOCC(OC(=O)[Cs])COC(=O)[Rb])C",
+      "notes": "alias for DGTS"
+    },
+    {
+      "abbreviation": "OL",
+      "name": "Ornithine lipid",
+      "SMILES": "N([H])([H])CCCC(C(O[H])=O)N([H])C(=O)CC(OC([Rb])=O)C[Cs]"
+    },
+    {
+      "abbreviation": "DAG",
+      "name": "diacylglycerol Core lipid",
+      "SMILES": "[Fr]OCC(COC([Cs])=O)OC([Rb])=O",
+      "notes": "head group forms bond with O atom, Fr is used to mark rest, Cs for the chain",
+      "doi": "https://doi.org/10.1016/j.soilbio.2020.108045",
+      "tags": [
+        "IPL",
+        "functional group",
+        "phospholipid"
+      ]
+    },
+    {
+      "abbreviation": "DEG",
+      "name": "Dietherglycerophospholipid",
+      "SMILES": "[Fr]OCC(COC[Cs])OC[Rb]",
+      "notes": "Fr is used to mark rest, Cs chain "
+    },
+    {
+      "abbreviation": "CER",
+      "name": "Ceramide",
+      "SMILES": "[Fr]OCC(C(O[H])/C=C/[Rb])N([H])C(=O)[Cs]"
+    },
+    {
+      "abbreviation": "AEG",
+      "name": "Acyl/ether glycerophospholipid",
+      "SMILES": "[Fr]OCC(COC[Cs])OC([Rb])=O"
+    },
+    {
+      "abbreviation": "GDGT0",
+      "name": "Glycerol dialkyl glycerol tetraether",
+      "SMILES": "O1CCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(C[Fr])C1",
+      "formula": "C86H172O6",
+      "notes": "",
+      "doi": "",
+      "link": "https://pubchem.ncbi.nlm.nih.gov/compound/13870146#section=3D-Status"
+    },
+    {
+      "abbreviation": "OH-GDGT0",
+      "SMILES": "O1CCC(O[H])(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(C[Fr])C1",
+      "formula": "C86H172O6"
+    },
+    {
+      "abbreviation": "GDGT1",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "OH-GDGT1",
+      "SMILES": "O1CCC(O[H])(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "GDGT2",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C3CC(CC3)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "OH-GDGT2",
+      "SMILES": "O1CCC(O[H])(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C3CC(CC3)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "GDGT3",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC3CC(CC3)C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CC3)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "OH-GDGT3",
+      "SMILES": "O1CCC(O[H])(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[H])COCCC(C)CCCC3CC(CC3)C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CC3)CCCC(C)CCOC(C[Fr])C1)CC2"
+    },
+    {
+      "abbreviation": "GDGT4",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CCCC(C)CCOC(CO[H])COCCC(C)CCCC4CC(CC4)C(C)CCCC(C)CCC(C)CCCC(C)C4CC(CC4)CCCC(C)CCOC(C[Fr])C1)CC3)CC2"
+    },
+    {
+      "abbreviation": "OH-GDGT4",
+      "SMILES": "O1CCC(O[H])(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CCCC(C)CCOC(CO[H])COCCC(C)CCCC4CC(CC4)C(C)CCCC(C)CCC(C)CCCC(C)C4CC(CC4)CCCC(C)CCOC(C[Fr])C1)CC3)CC2"
+    },
+    {
+      "abbreviation": "GDGT5",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CCCC(C)CCOC(CO[H])COCCC(C)CCCC4CC(CC4)C4CC(C)(CCC4)CCC(C)CCCC(C)C4CC(CC4)CCCC(C)CCOC(C[Fr])C1)CC3)CC2"
+    },
+    {
+      "abbreviation": "GDGT5'",
+      "SMILES": "O1CCC(C)CCCC2CC(C(C)CCCC(C)CCC(C)CCCC(C)C3CC(CCCC(C)CCOCC(CO[H])OCCC(C)CCCC4CC(CC4)C4CC(C)(CCC4)CCC(C)CCCC(C)C4CC(CC4)CCCC(C)CCOC(C[Fr])C1)CC3)CC2"
+    },
+    {
+      "abbreviation": "AR",
+      "name": "Archaeol",
+      "SMILES": "CC(C)CCCC(C)CCCC(C)CCCC(C)CCOCC(CO[Fr])OCCC(C)CCCC(C)CCCC(C)CCCC(C)C"
+    },
+    {
+      "abbreviation": "OH-AR",
+      "name": "Hydroxyarchaeol",
+      "SMILES": "CC(C)CCCC(C)CCCC(C)CCCC(C)CCOCC(CO[Fr])OCCC(C)(O)CCCC(C)CCCC(C)CCCC(C)C"
+    },
+    {
+      "abbreviation": "2OH-AR",
+      "name": "Di-hydroxyarchaeol",
+      "SMILES": "CC(C)CCCC(C)CCCC(C)CCCC(C)(O)CCOCC(CO[Fr])OCCC(C)(O)CCCC(C)CCCC(C)CCCC(C)C"
+    }
+  ]
+}

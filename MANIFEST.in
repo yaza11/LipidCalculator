@@ -1,0 +1,3 @@
+recursive-include LipidCalculator *.txt
+recursive-include LipidCalculator *.csv
+recursive-include LipidCalculator *.json
