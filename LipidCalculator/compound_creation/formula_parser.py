@@ -238,6 +238,12 @@ class CompoundDict:
         # self._composition = new_dict
         return type(self)(new_dict)
 
+    def __neg__(self) -> Self:
+        return self.__mul__(-1)
+
+    def __hash__(self) -> int:
+        return hash(self.composition)
+
     def __eq__(self, other: Self) -> bool:
         return self.composition == other.composition
 
