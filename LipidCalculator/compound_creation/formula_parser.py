@@ -242,7 +242,7 @@ class CompoundDict:
         return self.__mul__(-1)
 
     def __hash__(self) -> int:
-        return hash(self.composition)
+        return hash(self.formula)
 
     def __eq__(self, other: Self) -> bool:
         return self.composition == other.composition
