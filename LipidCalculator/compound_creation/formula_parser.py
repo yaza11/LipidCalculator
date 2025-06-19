@@ -287,8 +287,10 @@ class CompoundDict:
     def from_diff(cls, ipt: str) -> Self:
         if NEG_SIGN in ipt:
             assert ipt.count(NEG_SIGN) <= 1, f'found more than one {NEG_SIGN}'
-        pos, neg = ipt.split(NEG_SIGN)
-        cd = cls(pos) - cls(neg)
+            pos, neg = ipt.split(NEG_SIGN)
+            cd = cls(pos) - cls(neg)
+        else:
+            cd = cls(ipt)
         return cd
 
     def _clean_charge(self) -> None:
