@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-from LipidCalculator.isotopes.elements import m_e
+from LipidCalculator.consts import m_e
 
 IN_FILE: str = 'isotopes.txt'
 
@@ -84,6 +84,7 @@ most_common_isotopes_to_mass_number['-'] = 0
 
 class Isotope:
     """Container for isotope properties."""
+
     def __init__(self, element: str, mass_number: int | str | None = None):
         if (mass_number is None) and ('[' in element):
             element, mass_number = element.split('[', 1)

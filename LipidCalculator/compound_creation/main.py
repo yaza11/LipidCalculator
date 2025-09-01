@@ -3,7 +3,7 @@ from typing import ItemsView, Iterable
 
 import numpy as np
 
-from LipidCalculator.isotopes.elements import m_e
+from LipidCalculator.consts import m_e
 
 from .formula_parser import CompoundDict, remove_charge, get_charge_from_str
 

@@ -1,8 +1,6 @@
 import os
 import pandas as pd
 
-m_e = 5.485799090441e-4
-
 df = pd.read_csv(
     os.path.join(os.path.dirname(__file__), 'elements.txt'),
     sep='\t',
