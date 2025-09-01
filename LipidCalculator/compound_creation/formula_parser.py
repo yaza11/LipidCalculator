@@ -96,8 +96,10 @@ def group_element_count(s: str) -> str:
     """
     identify start and end of elements and their counts
     """
-    return group_start_end(s, start_function=lambda x: x.isupper(),
-                           end_function=lambda x: end_group(x) or (x.isupper()) or (x in ''), start_end_symbols='{}')
+    return group_start_end(s,
+                           start_function=lambda x: x.isupper(),
+                           end_function=lambda x: end_group(x) or (x.isupper()) or (x in ''),
+                           start_end_symbols='{}')
 
 
 def format_charge(s: str) -> str:
@@ -248,12 +250,15 @@ class CompoundDict:
     """Wrapper around dicts."""
     _elements_sorting = set('C H O N P S'.split())
 
-    def __init__(self, compound_dict: dict[str, float | int] | str, skip_cleaning=False):
+    def __init__(self, compound_dict: dict[str, float | int] | str = None, skip_cleaning=False):
         if skip_cleaning:  # premature exit without checking keys and cleaning
             self._composition: dict[str, float | int] = compound_dict
             return
+        if compound_dict is None:
+            compound_dict = {}
 
-        assert isinstance(compound_dict, dict | str)
+        assert isinstance(compound_dict, dict | str), \
+            f'provided input {compound_dict} is neither dict nor string (got type {type(compound_dict)})'
 
         if isinstance(compound_dict, str):
             self._composition: dict[str, float | int] = parse_formula(
@@ -495,5 +500,7 @@ if __name__ == '__main__':
 
     # test_neg()
 
-    for i in range(5):
-        test_performance()
+    parse_formula('H+H')
+
+    # for i in range(5):
+    #     test_performance()
