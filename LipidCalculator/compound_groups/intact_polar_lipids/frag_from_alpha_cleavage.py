@@ -31,6 +31,7 @@ def find_cleavage_bonds(mol: Mol) -> dict[CleavagePos, tuple[tuple[int, int], ..
 
 
 def split_bond(mol, atom_idx1, atom_idx2):
+    """Cleave a molecule at the bond between the specified atoms. Return the generated fragments."""
     rw_mol = Chem.RWMol(mol)
     atom1 = rw_mol.GetAtomWithIdx(atom_idx1)
     atom2 = rw_mol.GetAtomWithIdx(atom_idx2)
@@ -53,22 +54,12 @@ def split_bond_add_H(mol, atom_idx1, atom_idx2, plts: bool = False) -> dict[str,
     atom2 = rw_mol.GetAtomWithIdx(atom_idx2)
 
     # Prepare carbon to accept explicit H+
-    # for n in atom1.GetNeighbors():
-    #     if n.GetAtomicNum() == 1:
-    #        n.SetFormalCharge(1)
-    #        break
     atom1.SetFormalCharge(1)
 
     # Remove the bond
     rw_mol.RemoveBond(atom1.GetIdx(), atom2.GetIdx())
 
     # protonate one of the H atoms bonded to C
-
-    # H = Chem.Atom(1)
-    # H.SetFormalCharge(1)
-    # h_idx = rw_mol.AddAtom(H)
-    # rw_mol.AddBond(atom1.GetIdx(), h_idx, Chem.BondType.SINGLE)
-
     # heteroatom has adduct that is now no longer charged
     h_atom = Chem.Atom(1)
     h_idx2 = rw_mol.AddAtom(h_atom)
@@ -94,24 +85,89 @@ def split_bond_add_H(mol, atom_idx1, atom_idx2, plts: bool = False) -> dict[str,
     return out  # tuple of Mol objects
 
 
+def set_formal_charge_zero(mol):
+    rw_mol = Chem.RWMol(mol)  # make mutable
+    for atom in rw_mol.GetAtoms():
+        atom.SetFormalCharge(0)
+    Chem.SanitizeMol(rw_mol)  # recheck valences, update
+    return rw_mol.GetMol()
+
+
+def add_proton_to_heteroatom(mol):
+    # make a mutable copy of the molecule
+    rw_mol = Chem.RWMol(mol)
+
+    # Find all heteroatoms (not C or H)
+    heteroatoms = [
+        atom for atom in rw_mol.GetAtoms()
+        if atom.GetAtomicNum() not in [6, 1]
+           and atom.GetFormalCharge() <= 0  # avoid overcharged species
+           and atom.GetTotalValence() <= Chem.GetPeriodicTable().GetDefaultValence(atom.GetAtomicNum())
+    ]
+    if len(heteroatoms) == 0:
+        heteroatoms = [
+            atom for atom in rw_mol.GetAtoms()
+            if atom.GetAtomicNum() not in [1]
+               and atom.GetFormalCharge() <= 0  # avoid overcharged species
+               and atom.GetTotalValence() <= Chem.GetPeriodicTable().GetDefaultValence(atom.GetAtomicNum())
+        ]
+
+    # Pick the first heteroatom
+    heteroatom = heteroatoms[0]
+    het_idx = heteroatom.GetIdx()
+
+    # Add a hydrogen atom
+    hydrogen = Chem.Atom(1)
+    hydrogen.SetFormalCharge(1)  # protonated hydrogen
+    h_idx = rw_mol.AddAtom(hydrogen)  # returns new atom index
+
+    # Add a single bond between heteroatom and hydrogen
+    rw_mol.AddBond(het_idx, h_idx, Chem.BondType.SINGLE)
+
+    # Optionally set the formal charge on the heteroatom to +1
+    heteroatom.SetFormalCharge(heteroatom.GetFormalCharge() + 1)
+
+    # Convert back to immutable Mol and sanitize to update valences and implicit Hs
+    mol_result = rw_mol.GetMol()
+    Chem.SanitizeMol(mol_result)  # recomputes valences, implicit H counts etc.
+
+    return mol_result
+
+
 def get_fragments(
         mol: Mol,
-        cleavage_pos: dict[CleavagePos, tuple[tuple[int, int], ...]],
-        keep_neutral=False
+        keep_neutral=False,
+        max_recursion_depth=3
 ) -> list[tuple[Mol, Mol]]:
-    """Split mol at cleavage pos. C atom gets positive charge"""
-    fragments = []
+    """Split mol at cleavage pos. C atom gets positive charge.
+
+    :returns
+    a list of tuples in which the first entry is the positive and the second the neutral fragment.
+    """
+    fragments: list[tuple[Mol, Mol]] = []
+
+    cleavage_pos = find_cleavage_bonds(mol)
     for k, bonds in cleavage_pos.items():
         for bond in bonds:
             if keep_neutral:
-                fragments.append(split_bond(mol, *bond))
+                frags: tuple[Mol, Mol] = split_bond(mol, *bond)
             else:
-                frags = split_bond_add_H(mol, *bond)
-                fragments.append((frags.get('pos'), frags.get('neutral')))
+                frags_d = split_bond_add_H(mol, *bond)
+                frags = frags_d.get('pos'), frags_d.get('neutral')
+            fragments.append(frags)
+            if not keep_neutral and (max_recursion_depth > 0):
+                # positive fragments can be fragmented further (and show up at the detector)
+                frag = set_formal_charge_zero(frags[0])
+                # set formal charge to 0
+
+                fragments.extend(
+                    get_fragments(frag, keep_neutral=keep_neutral, max_recursion_depth=max_recursion_depth - 1))
+
     return fragments
 
 
 def plot_ms2_prediction(mol, fragments: dict[float, Mol], annotations: dict[float, str] = None):
+    """Draw the original molecule, the generated fragments and the fragment pattern."""
     if annotations is None:
         annotations = {k: None for k in fragments}
     else:
@@ -122,14 +178,15 @@ def plot_ms2_prediction(mol, fragments: dict[float, Mol], annotations: dict[floa
 
     res_pixels = 1000
     img = Draw.MolToImage(Chem.RemoveHs(mol), size=(res_pixels, round(9 / 16 * res_pixels)))
-    fig, axs = plt.subplots(nrows=2, dpi=res_pixels)
+    # fig, axs = plt.subplots(nrows=2, dpi=res_pixels)
+    fig, axs = plt.subplots(nrows=2, layout='tight')
     axs[0].imshow(img)
     axs[0].axis('off')
 
     axs[1].stem(mzs, [1] * len(mzs), markerfmt='')
     for mz, frag, ann in zip(mzs, frag_mols, annotations.values()):
         # axs[1].text(mz, 1, d, rotation=45)
-        inset_ax = inset_axes(axs[1], width=.4, height=.4, loc='lower center',
+        inset_ax = inset_axes(axs[1], width=.8, height=.8, loc='lower center',
                               bbox_to_anchor=(mz, 1.1),
                               bbox_transform=axs[1].get_xaxis_transform(),
                               borderpad=0)
@@ -141,16 +198,21 @@ def plot_ms2_prediction(mol, fragments: dict[float, Mol], annotations: dict[floa
         inset_ax.axis('off')
 
     axs[1].set_xlabel('fragment m/z in Da')
-    plt.show()
+    return fig, axs
 
 
-def predict_ms2(smiles: str) -> dict[float, Mol]:
+def predict_ms2(smiles: str, adduct=None, **kwargs) -> dict[float, Mol]:
+    """Generate the fragment spectrum for a smiles. Assumes molecule is protonated."""
     mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    cleavage_pos = find_cleavage_bonds(mol)
-    frags = get_fragments(mol, cleavage_pos)
+    frags = get_fragments(mol, **kwargs)
+    # pos_frags: list[Mol] = [t[0] for t in frags]
 
-    mzs = [ExactMolWt(mol) + MASS_PROTON]
-    desc = [mol]
+    # TODO: implement for different adduct types
+    if adduct is None:
+        adduct_mass = MASS_PROTON
+
+    desc = [add_proton_to_heteroatom(mol)]
+    mzs = [ExactMolWt(desc[0])]
     for t in frags:
         frag = t[0]
         mz, d = ExactMolWt(frag), frag
@@ -160,20 +222,19 @@ def predict_ms2(smiles: str) -> dict[float, Mol]:
     return dict(zip(mzs, desc))
 
 
-def predict_losses(smiles: str) -> dict[float, Mol]:
+def predict_losses(smiles: str, **kwargs) -> dict[float, Mol]:
     mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    cleavage_pos = find_cleavage_bonds(mol)
-    frags = get_fragments(mol, cleavage_pos)
+    frags = get_fragments(mol, **kwargs)
 
-    mzs = [ExactMolWt(mol) + MASS_PROTON]
-    desc = [mol]
+    desc = [add_proton_to_heteroatom(mol)]
+    mzs = [ExactMolWt(desc[0])]
     for t in frags:
         frag = t[1]
         if frag is None:
             continue
-        mz, d = ExactMolWt(frag), frag
+        mz = ExactMolWt(frag)
         mzs.append(mz)
-        desc.append(d)
+        desc.append(frag)
 
     return dict(zip(mzs, desc))
 
@@ -214,13 +275,16 @@ if __name__ == "__main__":
     # Example
     # smiles = "CCOCC"  # Contains O, N (heteroatoms)
     # smiles = 'CCCC=CCCC=CCC=CCCC=CCCCC(=O)OCC(COC1OC(COC2OC(CO)C(O)C(O)C2O)C(O)C(O)C1O)OC(=O)CCCCCCCCCCCCCCCCC'  # 2G,DAG,C18:0,C20:4
-    smiles = 'CCCCCCCCCCCCCCCOCC(COP(=O)(O)OCCN)OCCCCCCCCCCCCCCC'  # PE,DEG,C30:0
+    # smiles = 'CCCCCCCCCCCCCCCOCC(COP(=O)(O)OCCN)OCCCCCCCCCCCCCCC'  # PE,DEG,C30:0
+    smiles = 'CC(C)CCCC(C)CCCC(C)CCCC(C)CCOCC(COC1OC(COC2OC(CO)C(O)C(O)C2O)C(O)C(O)C1O)OCCC(C)CCCC(C)CCCC(C)CCCC(C)C'  # 2G AR
     # mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
     # plt_indices_bond([mol])
     # cleavage_pos = find_cleavage_bonds(mol)
     # # split_bond_add_H(mol, 34, 35, plts=True)
     # frags = get_fragments(mol, cleavage_pos)
 
-    ms = predict_ms2(smiles)
+    ms = predict_ms2(smiles, max_recursion_depth=2)
     mol = Chem.MolFromSmiles(smiles)
-    plot_ms2_prediction(mol, ms)
+
+    fig, axs = plot_ms2_prediction(mol, ms)
+    plt.show()
