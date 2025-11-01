@@ -1,3 +1,4 @@
+# TODO: write SQL
 from typing import Literal
 
 import numpy as np
@@ -22,7 +23,7 @@ PieceTypes: type = Literal[*PIECE_TYPES]
 NEGATIVE_FORMULA = chr(0x2796)
 
 
-def remove_protons(mol: Mol):
+def _remove_protons(mol: Mol):
     """set radicals and formals to 0"""
     for a in mol.GetAtoms():
         a.SetNumRadicalElectrons(0)
@@ -33,7 +34,7 @@ def compare_fragment_to_substructures(
         fragment: Mol,
         pieces: dict[str, Mol]
 ) -> pd.DataFrame:
-    """For a given fragments and its building blocks, attempt to match the
+    """For a given fragment and its building blocks, attempt to match the
     fragment to a building block."""
 
     def _ct_atoms(mol_: Mol) -> int:
@@ -219,7 +220,7 @@ def test_for_single_mol():
     label = find_biggest_substructure(fragment, pieces)
 
     print(Chem.MolToSmiles(fragment))
-    remove_protons(fragment)
+    _remove_protons(fragment)
     print(Chem.MolToSmiles(fragment))
 
 

@@ -50,6 +50,7 @@ import numpy as np
 import rdkit
 import logging
 from rdkit import Chem
+from rdkit.Chem.Descriptors import ExactMolWt
 
 from rdkit.Chem.rdchem import Mol, Atom, EditableMol
 from rdkit.Chem import Draw, rdMolDescriptors
@@ -73,6 +74,7 @@ def ceil(a, b):
 
 
 def add_numbers(mol: Mol):
+    """Label atoms in a molecule with their index"""
     # from https://www.rdkit.org/docs/Cookbook.html
     for i, atom in enumerate(mol.GetAtoms()):
         atom.SetAtomMapNum(atom.GetIdx())
@@ -88,6 +90,7 @@ def mol_from_str(mol: str) -> Mol:
 
 
 def get_combined(mols: Iterable[Mol]) -> Mol:
+    """Turn multiple molecules into a single one. This does not add bonds between fragments."""
     if len(mols) == 0:
         return Mol()
     _combo = mols[0]
@@ -108,13 +111,13 @@ def combine_molecules(
     following https://asteeves.github.io/blog/2015/01/14/editing-in-rdkit/
     """
 
-    def infer_pos_is_bond_atom(combo: Mol, mol_pos: int | str) -> bool:
+    def is_bond_atom(combo: Mol, mol_pos: int | str) -> bool:
         """If pos refers to placeholder, mol_is_bond_atom must be False, otherwise True"""
         atom_type: str = mol_pos if isinstance(mol_pos, str) else combo.GetAtomWithIdx(mol_pos).GetSymbol()
         # if the atom type is one of the placeholders, the molecule position cannot refer to the bond atom
         return not (atom_type in PLACEHOLDER_ELEMENTS)
 
-    def find_bond_atom_for_placeholder(combo: Mol, idx: int) -> Atom:
+    def get_bond_atom_for_placeholder(combo: Mol, idx: int) -> Atom:
         """Get the atom that is bonded to the placeholder"""
         placeholder: Atom = combo.GetAtomWithIdx(idx)
         neighbours: list[Atom] = placeholder.GetNeighbors()
@@ -124,7 +127,7 @@ def combine_molecules(
             f'placeholder has more than one bond, please specify atom at which to bond by index'
         return neighbours[0]
 
-    def find_placeholder_for_bond_atom(combo: Mol, idx: int) -> Atom | None:
+    def get_placeholder_for_bond_atom(combo: Mol, idx: int) -> Atom | None:
         """Find the placeholder atom for an atom specified by its index"""
         neighbours = combo.GetAtomWithIdx(idx).GetNeighbors()
 
@@ -138,7 +141,7 @@ def combine_molecules(
             f'expected one or no placeholder item for atom with index {n.GetIdx()}'
         return placeholders[0] if n_placeholders > 0 else None
 
-    def find_bond_atom(combo: Mol, mol_pos: int | str, idx_is_bond_atom: bool) -> tuple[int, int | None]:
+    def get_bond_atom(combo: Mol, mol_pos: int | str, idx_is_bond_atom: bool) -> tuple[int, int | None]:
         """Determine indices of bond and placeholder atoms from inputs. Placeholder index may be missing."""
         if isinstance(mol_pos, str):  # placeholder provided by symbol
             assert mol_pos in PLACEHOLDER_ELEMENTS, f'atom {mol_pos} is not a placeholder'
@@ -151,14 +154,14 @@ def combine_molecules(
             assert len(placeholders) == 1, \
                 f'expected to find exactly 1 {mol_pos} atom, but found {len(placeholders)}'
             placeholder_idx: int = placeholders[0].GetIdx()
-            bond_atom_idx: int = find_bond_atom_for_placeholder(combo, placeholder_idx).GetIdx()
+            bond_atom_idx: int = get_bond_atom_for_placeholder(combo, placeholder_idx).GetIdx()
         elif idx_is_bond_atom:  # bond atom given, find placeholder
             bond_atom_idx: int = mol_pos
-            placeholder: Atom | None = find_placeholder_for_bond_atom(combo, bond_atom_idx)
+            placeholder: Atom | None = get_placeholder_for_bond_atom(combo, bond_atom_idx)
             placeholder_idx = placeholder.GetIdx() if isinstance(placeholder, Atom) else None
         else:  # idx of placeholder given, find bond atom
             placeholder_idx: int = mol_pos
-            bond_atom_idx: int = find_bond_atom_for_placeholder(combo, placeholder_idx).GetIdx()
+            bond_atom_idx: int = get_bond_atom_for_placeholder(combo, placeholder_idx).GetIdx()
         return bond_atom_idx, placeholder_idx
 
     def combine_at_indices(
@@ -168,6 +171,9 @@ def combine_molecules(
             mol1_placeholder: int | None,
             mol2_placeholder: int | None
     ) -> None:
+        """Add a bond by replacing two placeholder molecules, so
+        R1-Fr Rb-R2 --> R1-R2
+        """
         if mol1_placeholder is not None:
             placeholders_to_remove.append(mol1_placeholder)
         if mol2_placeholder is not None:
@@ -188,21 +194,22 @@ def combine_molecules(
         assert len(bond_orders) == n_bonds, 'need one bond order for each bond'
 
     em = Chem.EditableMol(_combo)
+    # form bonds between pairs of provided indices/ atoms
     placeholders_to_remove: list[int] = []
     for bond, bond_order in zip(bond_positions, bond_orders):
         mol1_position, mol2_position = bond
         # attempt to infer whether bond atom or placeholder has been provided
-        _mol1_idx_is_bond_atom = infer_pos_is_bond_atom(_combo, mol1_position)
-        _mol2_idx_is_bond_atom = infer_pos_is_bond_atom(_combo, mol2_position)
+        _mol1_idx_is_bond_atom = is_bond_atom(_combo, mol1_position)
+        _mol2_idx_is_bond_atom = is_bond_atom(_combo, mol2_position)
 
         try:
-            _mol1_idx, _mol1_placeholder = find_bond_atom(_combo, mol1_position, _mol1_idx_is_bond_atom)
-            _mol2_idx, _mol2_placeholder = find_bond_atom(_combo, mol2_position, _mol2_idx_is_bond_atom)
+            _mol1_idx, _mol1_placeholder = get_bond_atom(_combo, mol1_position, _mol1_idx_is_bond_atom)
+            _mol2_idx, _mol2_placeholder = get_bond_atom(_combo, mol2_position, _mol2_idx_is_bond_atom)
             # Remove placeholders and form bond
             combine_at_indices(em, _mol1_idx, _mol2_idx, _mol1_placeholder, _mol2_placeholder)
         except AssertionError as _e:
             # supress warning if
-            warnings.warn(f'bond between placeholders {mol1_position, mol2_position} could not be formed: {_e} ')
+            warnings.warn(f'bond between placeholders {mol1_position, mol2_position} could not be formed: {_e}')
 
     for ph_idx in sorted(placeholders_to_remove, reverse=True):
         em.RemoveAtom(ph_idx)
@@ -214,6 +221,9 @@ def combine_molecules(
 
 
 def generate_chain(chain_length: int, double_bonds: int) -> str:
+    """
+    Generate the smiles for a chain of a certain length with a certain number of double bonds. Spaces double bonds
+    equally along the chain. Cs is used as a placeholder"""
     assert chain_length >= double_bonds, \
         f"Cannot fit {double_bonds} in chain of length {chain_length}"
     positions_double_bonds = np.linspace(0, chain_length, double_bonds + 2)[1:-1]
@@ -248,6 +258,7 @@ def generate_chain(chain_length: int, double_bonds: int) -> str:
 def remove_placeholders(
         mol: Mol
 ) -> Mol:
+    """Remove atoms that are being used as placeholders."""
     edmol: Chem.EditableMol = Chem.EditableMol(mol)
     atoms_to_remove = [atom.GetIdx()
                        for atom in mol.GetAtoms()
@@ -280,7 +291,7 @@ def plt_indices_bond(mols):
     plt.show()
 
 
-def IPL(
+def connect_ipl_pieces(
         head: str,
         core: str,
         chain1: tuple[int, int] | str | None = None,
@@ -288,6 +299,12 @@ def IPL(
         bond_positions: Iterable[tuple[str | int, str | int]] = None,
         plts: bool = False
 ):
+    """Piece together an intact polar lipid from the provided head, core chains and bond positions. Not intended to be called directly."""
+    if isinstance(chain1, str):
+        chain1 = parse_chain_str(chain1)
+    if isinstance(chain2, str):
+        chain2 = parse_chain_str(chain2)
+
     if chain1 is not None:
         chain1: str = generate_chain(*chain1)
     if chain2 is not None:
@@ -412,16 +429,17 @@ def get_struct(inpt: str | tuple[int, int]) -> str | None:
     return get_smiles(inpt)
 
 
-def get_mol_from_abbr(inpt: str, placeholders: bool = False) -> Mol:
+def get_mol_from_abbr(inpt: str, keep_placeholders: bool = False) -> Mol:
     """Get a piece by abbreviation (removes placeholders if placeholders is
     set to False, which is the default)"""
     mol = mol_from_str(get_struct(inpt))
-    if not placeholders:
+    if not keep_placeholders:
         mol = remove_placeholders(mol)
     return mol
 
 
 def get_bonds_interactively(mols: Iterable[Mol]) -> list[tuple[int, int]]:
+    """Draw a molecule with atom indices and ask for bonds between indices"""
     plt_indices_bond(mols)
     bond_positions = []
     while True:
@@ -461,27 +479,56 @@ def correct_chain_length_for_core(
     return lc, dbc
 
 
+def replace_OOP_with_OP(mol):
+    rw_mol = Chem.RWMol(mol)
+
+    # Find O–O–P
+    match = rw_mol.GetSubstructMatch(Chem.MolFromSmarts("[O]-[O]-[P]"))
+    if not match:
+        return mol  # no change
+
+    o1_idx, o2_idx, p_idx = match  # first O, middle O, P
+
+    # Delete the middle oxygen
+    rw_mol.AddBond(o1_idx, p_idx, Chem.BondType.SINGLE)
+
+    rw_mol.RemoveAtom(o2_idx)
+
+    Chem.SanitizeMol(rw_mol)
+    return rw_mol.GetMol()
+
+
 def ipl_automatic_bonds(
         names: Iterable[str],
         split_chain: bool = True,
         sort_chains: bool = True,
+        remove_double_oxygen: bool = True,
         plts=False,
         idx_plt: bool = False
 ) -> Mol:
+    """
+    Attempt to form bonds between pieces automatically by idenitfying piece types and placeholders.
+
+    for head groups that contain a phospahte group and are connected to a glycerol backbone, it is convention to
+    consider molecules that connect the OH group of the glycerol directly to P instead of having a O-O-P fragment.
+    """
+
     def _check_piece_types(names_) -> tuple[list[str], list[bool], list[bool], int, str]:
         is_chain_: list[bool] = [(name.startswith('C') and ':' in name) for name in names_]
         grps_: list[str] = [ABBREVIATION_TO_GROUP.get(name,
                                                       'chain' if _is_chain
                                                       else None) for name, _is_chain in zip(names_, is_chain_)]
+        assert grps_.count('core lipids') == 1, \
+            f'automatic bonding only works with exactly one core unit but got {dict(zip(names_, grps_))}'
+
         is_core_: list[bool] = [grp == 'core lipids' for grp in grps_]
+        # assert sum(is_core_) == 1, f'need exactly one core but none of {names_} is'
         core_: str = names[is_core_.index(True)]  # always need core, so we can assign it here
 
         assert None not in grps_, \
             (f'cannot use name(s) {[names_[idx] for idx, grp in enumerate(grps_) if grp is None]} '
              f'because the are not associated with a group')
 
-        assert grps_.count('core lipids') == 1, \
-            'automatic bonding only works with exactly one core unit'
         assert (n_chains_ := sum(is_chain_)) <= 2, \
             'automatic bonding only works with at most two chains'
         assert grps_.count('head groups') + grps_.count('functional groups') <= 1, \
@@ -650,6 +697,8 @@ def ipl_automatic_bonds(
     # supress warnings for placeholders
     mol = combine_molecules(mols, bond_positions=bond_pairs)
     mol = remove_placeholders(mol)
+    if remove_double_oxygen:
+        mol = replace_OOP_with_OP(mol)
 
     formula = rdMolDescriptors.CalcMolFormula(mol)
     logger.info(f'successfully build molecule with formula {formula}')
@@ -661,7 +710,7 @@ def ipl_automatic_bonds(
     return mol
 
 
-def build_molecule(plts: bool = False, always_manual=False) -> Mol:
+def interactively_build_molecule(plts: bool = False, always_manual=False) -> Mol:
     """Requires console input"""
 
     def parse_input(inpt: str):
@@ -725,7 +774,7 @@ def test_ipl():
 
     # plt_indices_bond([mol])
 
-    clean = PC_DAG_C24d12 = IPL(
+    clean = PC_DAG_C24d12 = connect_ipl_pieces(
         head=smiles_pc,
         core=smiles_dag,
         chain1=(24, 12),
@@ -750,4 +799,13 @@ if __name__ == '__main__':
     # mol = ipl_automatic_bonds('PE,DEG,C10:0,C1:0'.split(','), plts=True, idx_plt=True, split_chain=False)
     # mol = ipl_automatic_bonds('PE,AEG,C0:0,C10:0'.split(','), plts=True, idx_plt=True,
     #                           split_chain=False, sort_chains=False)
-    mol = ipl_automatic_bonds('SQ DAG C22:0 C6:0'.split(), plts=True, idx_plt=False)
+    # mol = ipl_automatic_bonds('SQ DAG C22:0 C6:0'.split(), plts=True, idx_plt=False)
+    mol = ipl_automatic_bonds('OL C6:0'.split(), plts=True, idx_plt=False, split_chain=False)
+
+    from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import add_proton_to_heteroatom
+
+    add_proton_to_heteroatom(mol)
+
+    print(Chem.MolToSmiles(mol))
+    print(ExactMolWt(mol))
+    print(rdMolDescriptors.CalcMolFormula(mol))

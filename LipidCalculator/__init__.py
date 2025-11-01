@@ -1,0 +1,2 @@
+from LipidCalculator.compound_creation import Compound
+from LipidCalculator.compound_creation.formula_parser import CompoundDict

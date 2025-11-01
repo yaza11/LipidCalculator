@@ -23,7 +23,7 @@ CORE_IMPLICIT_CHAIN: dict[tuple[str, str], tuple[int, int]] = {
     ('AEG', 'Rb'): (1, 0)
 }
 
-path_file_blocks = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'package.json')
+path_file_blocks = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'package.json')
 with open(path_file_blocks, 'r') as f:
     IPL_PIECES: dict[str, str | list] = json.load(f)
 
