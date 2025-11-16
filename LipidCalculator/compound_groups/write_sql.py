@@ -20,6 +20,7 @@ chain2s = [f'C{i}:0' for i in range(6, 31, 1)] + [f'C{i}:1' for i in range(6, 31
 # combine heads, cores, chains in all possible combinations to get characteristic fragments
 HEADS = [k for k, v in ABBREVIATION_TO_GROUP.items() if v == 'head groups']
 CORES = [k for k, v in ABBREVIATION_TO_GROUP.items() if v == 'core lipids']
+HEADS.append(None)
 
 
 def to_orm_mol(mol: Mol):
@@ -45,6 +46,8 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
             adduct='M+' if not is_loss else None,
         )
         frags.append(f_peak)
+
+    pieces = {k: v for k, v in pieces.items() if v is not None}
 
     comp_name: str = ' '.join(pieces.values())
     if comp_name in compounds_in_db:
@@ -74,10 +77,10 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
         ion_to_frags = {}
         for ion in ions:
             # TODO: take adduct into account for fragments?
-            frags_and_losses: list[tuple[Mol, Mol]] = get_fragments(
+            frags_pos, frags_neut = get_fragments(
                 compound_mol, max_recursion_depth=0)
             frags = []
-            for f, l in frags_and_losses:
+            for f, l in zip(frags_pos, frags_neut):
                 _add_fragment(f, False)
                 _add_fragment(l, True)
             ion_to_frags[ion] = frags
@@ -103,13 +106,19 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
 
 
 restart = True
-
-# folder = r'\\hlabstorage.dmz.marum.de\scratch\Yannick\compounds\LipidCalculator'
-folder = r'C:\Users\yanni\Downloads\LipidCalculator'
-db_path = os.path.join(folder, 'database.db')
-
-log_file_errs = os.path.join(folder, 'errors.log')
-log_file_suc = os.path.join(folder, 'created.log')
+is_test = True
+folder = r'\\hlabstorage.dmz.marum.de\scratch\Yannick\compounds\LipidCalculator'
+# folder = r"C:\Users\Yannick Zander\Downloads"
+if is_test:
+    db_path = os.path.join(folder, 'database_test.db')
+    log_file_errs = os.path.join(folder, 'errors_test.log')
+    log_file_suc = os.path.join(folder, 'created_test.log')
+    chain1s = chain1s[:2]
+    chain2s = chain2s[:2]
+else:
+    db_path = os.path.join(folder, 'database.db')
+    log_file_errs = os.path.join(folder, 'errors.log')
+    log_file_suc = os.path.join(folder, 'created.log')
 
 if restart:
     if os.path.exists(db_path):
@@ -131,7 +140,8 @@ SqlBaseClassComp.metadata.create_all(engine)
 # TODO: use json directly
 # start by submitting compound groups to the database
 if restart:
-    str_to_compound_group_obj = {s: CompoundGroup(name=s, abbreviation=s) for s in HEADS + CORES}
+    str_to_compound_group_obj = {s: CompoundGroup(name=s if s is not None else '', abbreviation=s) for s in
+                                 HEADS + CORES}
     ipl = CompoundGroup(name='intact polar lipids', abbreviation='IPL')
     with Session(engine) as session:
         for g in str_to_compound_group_obj.values():
@@ -151,7 +161,6 @@ pred_losses: dict[str, dict[float, str | None]] = {}
 heads_cores = list(itertools.product(HEADS, CORES))
 with Session(engine) as session:
     for head, core in tqdm(heads_cores, total=len(heads_cores), desc='writing database'):
-        mol_head: Mol = get_mol_from_abbr(head)
         if ('GDGT' in core) or ('AR' in core):  # no chains
             pieces = dict(head=head, core=core)
             add_mol_as_comp(session, pieces)

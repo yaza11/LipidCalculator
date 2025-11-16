@@ -707,6 +707,7 @@ def ipl_automatic_bonds(
         mplt_mol(mol)
         plt.show()
 
+    Chem.SanitizeMol(mol)
     return mol
 
 
@@ -800,7 +801,7 @@ if __name__ == '__main__':
     # mol = ipl_automatic_bonds('PE,AEG,C0:0,C10:0'.split(','), plts=True, idx_plt=True,
     #                           split_chain=False, sort_chains=False)
     # mol = ipl_automatic_bonds('SQ DAG C22:0 C6:0'.split(), plts=True, idx_plt=False)
-    mol = ipl_automatic_bonds('OL C6:0'.split(), plts=True, idx_plt=False, split_chain=False)
+    mol = ipl_automatic_bonds('1G DAG C33:1'.split(), plts=True, idx_plt=False, split_chain=True)
 
     from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import add_proton_to_heteroatom
 
