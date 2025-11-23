@@ -50,15 +50,16 @@ import numpy as np
 import rdkit
 import logging
 from rdkit import Chem
-from rdkit.Chem.Descriptors import ExactMolWt
 
 from rdkit.Chem.rdchem import Mol, Atom, EditableMol
-from rdkit.Chem import Draw, rdMolDescriptors
+from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.Draw import IPythonConsole
 
-from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import DATA_FRAME_IPL_PIECES, \
-    PLACEHOLDER_ELEMENTS, \
+from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import PLACEHOLDER_ELEMENTS, \
     get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES
+
+from LipidCalculator.rdkit.plotting import mplt_mol, plt_indices_bond
+from LipidCalculator.rdkit.util import add_indices, mol_from_str, get_combined
 
 logger = logging.getLogger(__name__)
 
@@ -73,33 +74,7 @@ def ceil(a, b):
     return -(a // -b)
 
 
-def add_numbers(mol: Mol):
-    """Label atoms in a molecule with their index"""
-    # from https://www.rdkit.org/docs/Cookbook.html
-    for i, atom in enumerate(mol.GetAtoms()):
-        atom.SetAtomMapNum(atom.GetIdx())
-    return mol
-
-
-def mol_from_str(mol: str) -> Mol:
-    if mol.startswith('InChi'):
-        mol = Chem.MolFromInchi(mol)
-    else:
-        mol = Chem.MolFromSmiles(mol)
-    return mol
-
-
-def get_combined(mols: Iterable[Mol]) -> Mol:
-    """Turn multiple molecules into a single one. This does not add bonds between fragments."""
-    if len(mols) == 0:
-        return Mol()
-    _combo = mols[0]
-    for mol in mols[1:]:
-        _combo: Mol = Chem.CombineMols(_combo, mol)
-    return _combo
-
-
-def combine_molecules(
+def _combine_molecules_at_positions(
         mols_or_combo: Iterable[Mol] | Mol,
         bond_positions: Iterable[tuple[int | str, int | str]],
         bond_orders: Iterable[int] = None
@@ -220,7 +195,7 @@ def combine_molecules(
     return _combo
 
 
-def generate_chain(chain_length: int, double_bonds: int) -> str:
+def _get_chain_smiles(chain_length: int, double_bonds: int) -> str:
     """
     Generate the smiles for a chain of a certain length with a certain number of double bonds. Spaces double bonds
     equally along the chain. Cs is used as a placeholder"""
@@ -239,23 +214,7 @@ def generate_chain(chain_length: int, double_bonds: int) -> str:
     return chain
 
 
-# def add_chain(
-#         head_core: Mol,
-#         chain: str | tuple[int, int],
-#         pos: str
-# ) -> tuple[Mol, ...]:
-#     """replace placeholder atom by chain"""
-#     # TODO: make use of combine_molecules
-#     if type(chain) is not str:
-#         assert len(chain) == 2, 'provide chain length and number of double bonds as tuple'
-#         chain = generate_chain(*chain)
-#
-#     chain_mol: Mol = mol_from_str(chain)
-#     # TODO: option to use index for position
-#     return combine_molecules([head_core, chain_mol], pos, 'Cs')
-
-
-def remove_placeholders(
+def remove_placeholder_atoms(
         mol: Mol
 ) -> Mol:
     """Remove atoms that are being used as placeholders."""
@@ -274,23 +233,6 @@ def remove_placeholders(
     return clean
 
 
-def mplt_mol(mol: Mol, res_pixels=1000):
-    img = Draw.MolToImage(mol, size=(res_pixels, round(9 / 16 * res_pixels)))
-
-    fig, ax = plt.subplots(figsize=(img.width / res_pixels, img.height / res_pixels), dpi=res_pixels)
-    ax.imshow(img)
-    ax.axis('off')
-    return fig, ax
-
-
-def plt_indices_bond(mols):
-    combo: Mol = get_combined(mols)
-    combo = add_numbers(combo)
-
-    mplt_mol(combo)
-    plt.show()
-
-
 def connect_ipl_pieces(
         head: str,
         core: str,
@@ -301,14 +243,14 @@ def connect_ipl_pieces(
 ):
     """Piece together an intact polar lipid from the provided head, core chains and bond positions. Not intended to be called directly."""
     if isinstance(chain1, str):
-        chain1 = parse_chain_str(chain1)
+        chain1 = _parse_chain_str(chain1)
     if isinstance(chain2, str):
-        chain2 = parse_chain_str(chain2)
+        chain2 = _parse_chain_str(chain2)
 
     if chain1 is not None:
-        chain1: str = generate_chain(*chain1)
+        chain1: str = _get_chain_smiles(*chain1)
     if chain2 is not None:
-        chain2: str = generate_chain(*chain2)
+        chain2: str = _get_chain_smiles(*chain2)
 
     # turn smiles into molecules
     # print(head, core, chain1, chain2)
@@ -320,10 +262,10 @@ def connect_ipl_pieces(
     if bond_positions is None:  # manual input
         bond_positions = get_bonds_interactively(mols)
     # combine
-    combined = combine_molecules(
+    combined = _combine_molecules_at_positions(
         mols, bond_positions
     )
-    clean = remove_placeholders(combined)
+    clean = remove_placeholder_atoms(combined)
     # clean = combined
 
     if plts:
@@ -403,7 +345,7 @@ def connect_ipl_pieces(
     return clean
 
 
-def parse_chain_str(chain: str | tuple[int, int]) -> tuple[int, int]:
+def _parse_chain_str(chain: str | tuple[int, int]) -> tuple[int, int]:
     """E.g., 'C30:2' --> (30, 2)"""
     if not isinstance(chain, str):
         assert len(chain) == 2
@@ -419,10 +361,10 @@ def get_struct(inpt: str | tuple[int, int]) -> str | None:
     """Input is either chain (str or tuple) or name of an IPL piece"""
     if not isinstance(inpt, str):
         assert len(inpt) == 2
-        return generate_chain(*inpt)
+        return _get_chain_smiles(*inpt)
     if inpt.startswith('C') and ':' in inpt:
-        l, db = parse_chain_str(inpt)
-        return generate_chain(l, db)
+        l, db = _parse_chain_str(inpt)
+        return _get_chain_smiles(l, db)
     elif inpt not in ABBREVIATIONS:
         warnings.warn(f'structure with name {inpt} not found, returning None')
         return None
@@ -434,7 +376,7 @@ def get_mol_from_abbr(inpt: str, keep_placeholders: bool = False) -> Mol:
     set to False, which is the default)"""
     mol = mol_from_str(get_struct(inpt))
     if not keep_placeholders:
-        mol = remove_placeholders(mol)
+        mol = remove_placeholder_atoms(mol)
     return mol
 
 
@@ -538,7 +480,7 @@ def ipl_automatic_bonds(
 
     def _split_chains(chain_: str) -> tuple[str, str]:
         logging.info('splitting chain:', chain_)
-        l, db = parse_chain_str(chain_)
+        l, db = _parse_chain_str(chain_)
         l1, l2 = l // 2, ceil(l, 2)
         db1, db2 = db // 2, ceil(db, 2)
 
@@ -660,7 +602,7 @@ def ipl_automatic_bonds(
 
     # core chain correction: some core pieces contain parts of the chain
     chains_parsed: list[tuple[int, int]] = [
-        parse_chain_str(name)
+        _parse_chain_str(name)
         for name, _is_chain in zip(names, is_chain)
         if _is_chain
     ]
@@ -688,15 +630,15 @@ def ipl_automatic_bonds(
 
     if idx_plt:
         _mol = get_combined(mols)
-        _mol = add_numbers(_mol)
+        _mol = add_indices(_mol)
         mplt_mol(_mol)
         plt.show()
 
     bond_pairs = _find_bonds_placeholders(grps, mols, is_chain_placeholder)
 
     # supress warnings for placeholders
-    mol = combine_molecules(mols, bond_positions=bond_pairs)
-    mol = remove_placeholders(mol)
+    mol = _combine_molecules_at_positions(mols, bond_positions=bond_pairs)
+    mol = remove_placeholder_atoms(mol)
     if remove_double_oxygen:
         mol = replace_OOP_with_OP(mol)
 
@@ -745,8 +687,8 @@ def interactively_build_molecule(plts: bool = False, always_manual=False) -> Mol
 
     bond_positions = get_bonds_interactively(mols)
 
-    mol = combine_molecules(mols, bond_positions)
-    mol = remove_placeholders(mol)
+    mol = _combine_molecules_at_positions(mols, bond_positions)
+    mol = remove_placeholder_atoms(mol)
 
     formula = rdMolDescriptors.CalcMolFormula(mol)
     logger.info(f'successfully build molecule with formula {formula}')
@@ -801,12 +743,14 @@ if __name__ == '__main__':
     # mol = ipl_automatic_bonds('PE,AEG,C0:0,C10:0'.split(','), plts=True, idx_plt=True,
     #                           split_chain=False, sort_chains=False)
     # mol = ipl_automatic_bonds('SQ DAG C22:0 C6:0'.split(), plts=True, idx_plt=False)
-    mol = ipl_automatic_bonds('1G DAG C33:1'.split(), plts=True, idx_plt=False, split_chain=True)
+    mol = ipl_automatic_bonds('1G DAG C33:1'.split(), plts=False, idx_plt=False, split_chain=True)
 
-    from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import add_proton_to_heteroatom
+    mplt_mol(mol)
 
-    add_proton_to_heteroatom(mol)
-
-    print(Chem.MolToSmiles(mol))
-    print(ExactMolWt(mol))
-    print(rdMolDescriptors.CalcMolFormula(mol))
+    # from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import add_proton_to_heteroatom
+    #
+    # add_proton_to_heteroatom(mol)
+    #
+    # print(Chem.MolToSmiles(mol))
+    # print(ExactMolWt(mol))
+    # print(rdMolDescriptors.CalcMolFormula(mol))
