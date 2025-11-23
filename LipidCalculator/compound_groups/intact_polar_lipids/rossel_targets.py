@@ -11,8 +11,9 @@ from rdkit import Chem
 from rdkit.Chem import Mol, rdMolDescriptors
 from rdkit.Chem.Descriptors import ExactMolWt
 
-from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds, mol_from_str, \
-    remove_placeholders, get_struct
+from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds, \
+    remove_placeholder_atoms, get_struct
+from LipidCalculator.rdkit.util import mol_from_str
 
 ANME1 = 'ANME-1'
 ANME2 = 'ANME-2'
@@ -56,7 +57,7 @@ for org, targets in organism_to_targets.items():
         targets_to_mols[target] = mol
 
         head = mol_from_str(get_struct(names[0]))
-        head = remove_placeholders(head)
+        head = remove_placeholder_atoms(head)
         targets_to_heads[target] = head
 
         core = ipl_automatic_bonds(names[1:], plts=False)
