@@ -1,112 +1,63 @@
 """Use alpha/induced cleavages (breakage of carbon-carbon bonds next to
 heteroatoms) to predict fragments."""
-import warnings
-from typing import Literal, Iterable
+from typing import Literal, Iterable, Callable
 
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from rdkit import Chem
-from rdkit.Chem import Mol, rdMolDescriptors, EXPLICIT, inchi
+from rdkit.Chem import Mol, rdMolDescriptors, inchi, GetFormalCharge
 from rdkit.Chem.Descriptors import ExactMolWt
 
 from LipidCalculator import CompoundDict
-from LipidCalculator.adduct.rdkit_add_adduct import get_mol_with_adduct
-from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved
-from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
-from LipidCalculator.rdkit.plotting import mol_to_img, mplt_mol, plt_indices_bond
-from LipidCalculator.compound_groups.common_fragments import MASS_PROTON
+from LipidCalculator.adduct.rdkit_add_adduct import get_mol_with_adduct, steal_charge_from_adduct, find_adduct_positions
+from LipidCalculator.cleaving.alpha_cleavage import find_alpha_cleavage_positions, get_alpha_cleaved
+from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved, find_inductive_cleavage_positions
+from LipidCalculator.cleaving.sigma_cleavage import find_sigma_cleavage_positions, get_sigma_cleaved
+from LipidCalculator.rdkit.plotting import mol_to_img, plt_indices_bond
 
-CLEAVAGE_POS: list[str] = ['CO', 'CN', 'CP', 'CS']
-CleavagePos: type = Literal[*CLEAVAGE_POS]
+CLEAVAGE_TYPES = ['SIGMA', 'INDUCTIVE', 'ALPHA']
+CleavageType: type = Literal[*CLEAVAGE_TYPES]
+
 ChargeType: type = Literal['neutral', 'positive', 'negative']
 
 PERIODIC_TABLE = Chem.GetPeriodicTable()
 
-
-def _find_cleavage_bonds(mol: Mol) -> dict[CleavagePos, list[tuple[int, int]]]:
-    """
-    For a given molecule, identify bonds that are prone to inductive cleavages.
-    This applies to Carbon atoms bonded to O, N, S(?), P
-    """
-    matches = {}
-    for s_pattern in CLEAVAGE_POS:
-        pattern: Mol = Chem.MolFromSmarts(s_pattern)
-        matches[s_pattern] = list(mol.GetSubstructMatches(pattern))
-
-    return matches
+CLEAVAGE_TYPE_TO_FINDER: dict[CleavageType, Callable[[Mol], list[tuple[int, int]]]] = {
+    'SIGMA': find_sigma_cleavage_positions,
+    'INDUCTIVE': find_inductive_cleavage_positions,
+    'ALPHA': find_alpha_cleavage_positions
+}
 
 
-def _convert_to_modes_dict(fragments: Iterable[Mol]) -> dict[ChargeType, list[Mol]]:
+def _find_cleavage_positions(
+        mol: Mol, cleavage_types: list[CleavageType]
+) -> dict[CleavageType, tuple[int, int]]:
+    out = {ct: CLEAVAGE_TYPE_TO_FINDER[ct](mol) for ct in cleavage_types}
+    return out
+
+
+def _fragments_sort_by_charge(fragments: Iterable['Fragment']) -> dict[ChargeType, list['Fragment']]:
     """Split an iterable of fragments into neutral, positive and negative ones"""
-    out: dict[ChargeType, list[Mol]] = {'neutral': [], 'positive': [], 'negative': []}
+    out: dict[ChargeType, list['Fragment']] = {'neutral': [], 'positive': [], 'negative': []}
     for frag in fragments:
-        Chem.SanitizeMol(frag)
-        c = Chem.GetFormalCharge(frag)
-        if c == 0:
+        if (c := frag.charge) == 0:
             out['neutral'].append(frag)
         elif c > 0:
             out['positive'].append(frag)
         else:
             out['negative'].append(frag)
-    return out  # tuple of Mol objects
-
-
-# def split_bond(mol, atom_idx1, atom_idx2, is_inductive=None) -> tuple[Mol, Mol]:
-#     """Cleave a molecule at the bond between the specified atoms. Return the generated fragments."""
-#     rw_mol = Chem.RWMol(mol)
-#     atom1 = rw_mol.GetAtomWithIdx(atom_idx1)
-#     atom2 = rw_mol.GetAtomWithIdx(atom_idx2)
-#     rw_mol.RemoveBond(atom1.GetIdx(), atom2.GetIdx())
-#     Chem.SanitizeMol(rw_mol)
-#     frags: tuple[Mol] = Chem.GetMolFrags(rw_mol, asMols=True, sanitizeFrags=True)
-#     return frags
-
-
-def reduce_charge(mol):
-    """Reduce formal charge of the one with the highest by one"""
-    raise NotImplementedError
-    rw_mol = Chem.RWMol(mol)  # make mutable
-    idx_max: int = -1
-    score = -float('inf')
-    for i, atom in enumerate(rw_mol.GetAtoms()):
-        allowed_valences = list(PERIODIC_TABLE.GetValenceList(atom.GetAtomicNum()))
-        if (atom.GetTotalValence()) in allowed_valences:  # valid candidate
-            # reducing the formal charge increases the valence, so ideally the atom we are changing has a lower than default valence
-            _score = PERIODIC_TABLE.GetDefaultValence(atom.GetAtomicNum()) - atom.GetTotalValence()
-            if _score > score:
-                score = _score
-                idx_max = i
-    if idx_max == -1:
-        mplt_mol(rw_mol)
-    assert idx_max >= 0
-
-    atom_to_modify = rw_mol.GetAtomWithIdx(idx_max)
-    formal_charge = atom_to_modify.GetFormalCharge()
-    print(
-        f'changing formal charge of atom with index {idx_max} of type {atom_to_modify.GetAtomicNum()} to {formal_charge - 1} (new valence is {atom_to_modify.GetValence(which=EXPLICIT)})'
-    )
-    print('before:', atom_to_modify.GetFormalCharge(), atom_to_modify.GetValence(which=EXPLICIT),
-          atom_to_modify.GetTotalValence(),
-          atom_to_modify.GetNumImplicitHs(), atom_to_modify.GetIsAromatic())
-    atom_to_modify.SetFormalCharge(formal_charge - 1)
-    atom_to_modify.UpdatePropertyCache()
-
-    # check this worked
-    _atom = rw_mol.GetAtomWithIdx(idx_max)
-    print('after:', _atom.GetFormalCharge(), _atom.GetValence(which=EXPLICIT), _atom.GetTotalValence(),
-          _atom.GetNumImplicitHs())
-
-    Chem.SanitizeMol(rw_mol)  # recheck valences, update
-    return rw_mol.GetMol()
+    return out
 
 
 def plot_ms2_prediction(
-        mol,
         fragments: list['Fragment'],
+        as_negative: bool = False,
         annotations: dict[float, str] = None,
-        res_pixels_parent=2000
-):
+        res_pixels_child=1000,
+        add_struct_plots: bool = True,
+        ax: plt.Axes = None
+) -> plt.Axes:
     """Draw the original molecule, the generated fragments and the fragment pattern."""
     if annotations is None:
         annotations = {k: None for k in fragments}
@@ -114,51 +65,94 @@ def plot_ms2_prediction(
         # TODO: check annotations match fragments
         pass
 
-    img = mol_to_img(mol, res_pixels=res_pixels_parent)
-    # fig, axs = plt.subplots(nrows=2, dpi=res_pixels)
-    fig, axs = plt.subplots(nrows=2)
-    axs[0].imshow(img)
-    axs[0].axis('off')
+    if ax is None:
+        _, ax = plt.subplots()
+
+    if len(fragments) == 0:
+        print('No fragments to plot')
+        return ax
+
+    is_neutral: bool = fragments[0].charge == 0
+    assert all([(f.charge == 0) is is_neutral for f in fragments]), \
+        'all fragments must either be neutral or positive'
+
+    def x_getter(frag: Fragment) -> float:
+        if is_neutral:
+            return frag.mass
+        return frag.mz
 
     # plot fragments with different colors depending on recursion depth
-    mzs = np.array([f.mz for f in fragments])
-    ints = np.array([f.probability for f in fragments])
-    rds = np.array([f.recursion_depth for f in fragments])
-    for c, rd in enumerate(np.unique(rds)):
-        mask = rds == rd
-        axs[1].stem(
-            mzs[mask],
-            ints[mask],
-            markerfmt='',
-            basefmt='k',
-            linefmt=f'C{c}'
-        )
+    # xs = np.array([x_getter(f) for f in fragments])
+    # ints = np.array([f.probability for f in fragments])
+    # if as_negative:
+    #     ints *= -1
+    #
+    # rds = np.array([f.recursion_depth for f in fragments])
+    # for c, rd in enumerate(np.unique(rds)):
+    #     mask = rds == rd
+    #     ax.stem(
+    #         xs[mask],
+    #         ints[mask],
+    #         markerfmt='',
+    #         basefmt='k',
+    #         linefmt=f'C{c}'
+    #     )
 
-    # add annotations
-    tr = axs[1].get_xaxis_transform()
+    ct_to_color = {
+        None: 'blue',
+        'INDUCTIVE': 'red',
+        'ALPHA': 'green',
+        'SIGMA': 'yellow',
+    }
+    linestyles = ['solid', 'dashed', 'dotted']
+
+    tr = ax.get_xaxis_transform()
     for i, (frag, ann) in enumerate(zip(fragments, annotations.values())):
-        mz = frag.mz
-        p = (mz, np.random.random() * .8 + .1)
-        axs[1].plot(*p, transform=tr, marker='o', c='r')
-        inset_ax = inset_axes(axs[1], width=1.5, height=1.5, loc='center',
+        x = x_getter(frag)
+        ymin = 0
+        ymax = frag.probability
+        if as_negative:
+            ymin, ymax = -ymax, ymin
+        ax.vlines(x, ymin=ymin, ymax=ymax, color=ct_to_color.get(frag.cleavage_type, 'k'),
+                  linestyles=linestyles[frag.recursion_depth % len(linestyles)])
+
+        # add annotations
+        # TODO: use absolute position and respect negative
+        p = (x, np.random.random() * .8 + .1)
+        lbl_mz = f'{x:.4f}'
+        if (ct := frag.cleavage_type) is None:
+            cleave_type_ann = ''
+        elif ct == 'INDUCTIVE':
+            cleave_type_ann = 'I'
+        elif ct == 'ALPHA':
+            cleave_type_ann = r'$\alpha$'
+        elif ct == 'SIGMA':
+            cleave_type_ann = r'$\sigma$'
+        else:
+            raise NotImplementedError
+        txt = f'{frag.formula}\n({cleave_type_ann}, {lbl_mz})' if ann is None else ann + '\n' + f'({lbl_mz})'
+        ax.text(x, 1, txt, rotation=45)
+        # only add structure for more than 5 atoms
+        cd = CompoundDict(frag.formula)
+        num_non_h = sum([v for k, v in cd.composition.items() if k not in ('H', '+', '-')])
+        if (not add_struct_plots) or (num_non_h <= 3):
+            continue
+        ax.plot(*p, transform=tr, marker='o', c='r')
+        inset_ax = inset_axes(ax, width=4, height=4, loc='center',
                               bbox_to_anchor=p,
                               bbox_transform=tr,
                               borderpad=0)
-        lbl_mz = f'{mz:.4f}'
-        txt = f'{frag.formula}\n({lbl_mz})' if ann is None else ann + '\n' + f'({lbl_mz})'
-        axs[1].text(mz, 1, txt, rotation=45)
-        frag_img = mol_to_img(mol=frag.mol, res_pixels=int(res_pixels_parent / 10))
+        frag_img = mol_to_img(mol=frag.mol, res_pixels=res_pixels_child)
         inset_ax.imshow(frag_img)
         inset_ax.axis('off')
 
-    axs[1].set_xlabel('fragment m/z in Da')
-    return fig, axs
+    ax.set_xlabel(f'fragment {'mass' if is_neutral else 'm/z'} in Da')
+    return ax
 
 
 class Fragment:
     _inchkey: str = None
     mol: Mol = None
-    _ion: Mol = None
     recursion_depth: int = None
     _mass: float = None
     _charge: float = None
@@ -167,29 +161,24 @@ class Fragment:
     _formula: str = None
     probability: float = None
 
-    _cleavage_type: tuple[CleavagePos, bool] = None
+    cleavage_type: CleavageType = None
+    cleavage_pos_in_parent: tuple[int, int] = None
     _child_fragments: list['Fragment'] = None
     _max_recursion_depth: int = None
 
-    def set_ion(self, adduct_type: str):
-        self._ion = get_mol_with_adduct(self.mol, adduct_type, return_mode='first')
-
-    @classmethod
-    def from_uncharged(cls, mol, adduct_type: str = '[M+H]+'):
-        frag = Fragment(mol=mol)
-        frag.set_ion(adduct_type)
-        return frag
-
-    @property
-    def ion(self):
-        """Apart from the root, the ion is the molecule itself ...
-        it is assumed that the adduct is lost during fragmentation"""
-        return self._ion if self._ion is not None else self.mol
-
-    def __init__(self, mol: Mol, recursion_depth: int = 0, probability: float = 1):
+    def __init__(
+            self,
+            mol: Mol,
+            recursion_depth: int = 0,
+            probability: float = 1,
+            cleavage_type: CleavageType = None,
+            cleavage_pos_in_parent: tuple[int, int] = None,
+    ):
         self.mol = mol
         self.recursion_depth = recursion_depth
         self.probability = probability
+        self.cleavage_type = cleavage_type
+        self.cleavage_pos_in_parent = cleavage_pos_in_parent
 
     @property
     def inchkey(self):
@@ -222,7 +211,7 @@ class Fragment:
         return self._formula
 
     def _set_child_fragments(
-            self, max_recursion_depth: int, only_inductive: bool
+            self, cleavage_types: list[CleavageType], max_recursion_depth: int
     ):
         self._max_recursion_depth = max_recursion_depth
 
@@ -230,56 +219,55 @@ class Fragment:
         _inchkeys = set()
         self._child_fragments: list['Fragment'] = []
 
-        is_cleavage_type_inductive: list[bool] = [True]
-        if not only_inductive:
-            is_cleavage_type_inductive.append(False)
-
-        print(only_inductive, is_cleavage_type_inductive)
-
         # maximum recursion depth reached
-        if self.recursion_depth > max_recursion_depth:
+        if self.recursion_depth >= max_recursion_depth:
             return
 
-        # only add hydrogen for first cleavage
-        is_first_order: bool = self.recursion_depth == 0
-        # split_func = split_bond_add_H if is_first_order else split_bond
-        split_func = get_inductively_cleaved
-
-        cleavage_pos: dict[CleavagePos, list[tuple[int, int]]] = (
-            _find_cleavage_bonds(self.mol)
+        cleavage_pos: dict[CleavageType, list[tuple[int, int]]] = (
+            _find_cleavage_positions(self.mol, cleavage_types)
         )
-        for bond_type, positions in cleavage_pos.items():
+
+        for cleavage_type, positions in cleavage_pos.items():
+            if cleavage_type == 'SIGMA':
+                split_func = get_sigma_cleaved
+            elif cleavage_type == 'ALPHA':
+                split_func = get_alpha_cleaved
+            elif cleavage_type == 'INDUCTIVE':
+                split_func = get_inductively_cleaved
+            else:
+                raise ValueError(f'Unknown cleavage type: {cleavage_type}')
             for position in positions:
-                # one time C gets charge, other time heteroatom
-                for is_inductive in is_cleavage_type_inductive:
-                    # is_inductive not used in this case
-                    parts: tuple[Mol, Mol] = split_func(
-                        mol=self.mol,
-                        c_atom_idx=position[0],
-                        hetero_atom_idx=position[1],
-                        is_inductive=is_inductive
+                try:
+                    parts: tuple[Mol, Mol] = split_func(self.mol, *position)
+                except Exception as e:
+                    print(e)
+                    continue
+                for part in parts:
+                    frag: Fragment = Fragment(
+                        mol=part,
+                        recursion_depth=self.recursion_depth + 1,
+                        cleavage_type=cleavage_type,
+                        cleavage_pos_in_parent=position
                     )
-                    parts_fragments: list[Fragment] = []
-                    for part in parts:
-                        frag: Fragment = Fragment(
-                            mol=part, recursion_depth=self.recursion_depth + 1
+                    # this either enters the recursion or returns immediately
+                    if frag.inchkey in _inchkeys:
+                        continue
+                    _inchkeys.add(frag.inchkey)
+                    # TODO: move charge
+                    frag_neut = ...
+
+                    if frag.charge > 0:  # fragment positive fragments further
+                        frag._set_child_fragments(
+                            max_recursion_depth=max_recursion_depth,
+                            cleavage_types=cleavage_types
                         )
-                        # this either enters the recursion or returns immediately
-                        if frag.inchkey in _inchkeys:
-                            continue
-                        _inchkeys.add(frag.inchkey)
-                        if frag.charge > 0:  # fragment positive fragments further
-                            frag._set_child_fragments(
-                                max_recursion_depth=max_recursion_depth,
-                                only_inductive=only_inductive
-                            )
-                        self._child_fragments.append(frag)
+                    self._child_fragments.append(frag)
 
     def get_child_fragments(
-            self, max_recursion_depth: int = 1, only_inductive: bool = True
+            self, cleavage_types: list[CleavageType], max_recursion_depth: int = 1,
     ):
         if (self._child_fragments is None) or (self._max_recursion_depth != max_recursion_depth):
-            self._set_child_fragments(max_recursion_depth, only_inductive)
+            self._set_child_fragments(cleavage_types, max_recursion_depth)
         return self._child_fragments
 
     def get_all_fragments(self, **kwargs) -> list['Fragment']:
@@ -308,167 +296,133 @@ class FragmentTree:
     root: Fragment = None
     max_recursion_depth: int = None
     only_inductive: bool = None
-
-    @classmethod
-    def from_mol(cls, mol: Mol, **kwargs):
-        root = Fragment.from_uncharged(mol=mol)
-        new = cls(root, **kwargs)
-        return new
-
-    @classmethod
-    def from_ipl_name(cls, ipl_name: str, **kwargs):
-        mol = ipl_automatic_bonds(ipl_name.split())
-        new = cls.from_mol(mol=mol, **kwargs)
-        return new
+    _ions: list[Fragment] = None
 
     def __init__(
             self,
-            root: Fragment,
-            max_recursion_depth=1,
-            only_inductive: bool = True
+            mol: Mol,
+            adduct_type: str,
+            max_recursion_depth: int = 1,
+            cleavage_types: list[CleavageType] = None
     ):
-        self.root = root
+        self.mol = mol
+        if GetFormalCharge(mol) == 0:
+            self._set_ions(adduct_type)
+        else:
+            self._ions = [Fragment(mol=mol)]
+
         self.max_recursion_depth = max_recursion_depth
-        self.only_inductive = only_inductive
 
-    def get_all_positive_fragments(self) -> list[Fragment]:
-        fragments: list[Fragment] = self.root.get_all_fragments(
-            max_recursion_depth=self.max_recursion_depth,
-            only_inductive=self.only_inductive
-        )
-        return [f for f in fragments if f.charge > 0]
+        if cleavage_types is None:
+            cleavage_types = CLEAVAGE_TYPES.copy()
+        else:
+            assert all([ct in CLEAVAGE_TYPES for ct in cleavage_types])
+        self.cleavage_types = cleavage_types
 
-    def plot_ms2(self):
-        frags = self.get_all_positive_fragments()
-        # deduplicate with formulas
+    def _set_ions(self, adduct_type: str):
+        """
+        Add adducts to all neutral heteroatoms and simulate stripping away the adduct, attempting to one time
+        keep and another time remove the H (only if adduct contains H)
+        """
+        _keep_hs = [False]
+        if 'H' in adduct_type:
+            _keep_hs.append(True)
+
+        _adduct_positions: list[int] = find_adduct_positions(self.mol)
+        self._ions: list[Fragment] = []
+
+        for _adduct_pos in _adduct_positions:
+            _mol_with_adduct = get_mol_with_adduct(
+                self.mol, add=adduct_type, return_mode='index', idx=_adduct_pos
+            )
+            for _keep_h in _keep_hs:
+                if adduct_type == 'M+':  # nothing to steal from
+                    _mol_with_h_plus = _mol_with_adduct
+                else:
+                    _mol_with_h_plus = steal_charge_from_adduct(
+                        _mol_with_adduct, keep_h=_keep_h, plts=False
+                    )
+                self._ions.append(Fragment(_mol_with_h_plus))
+
+    def plot_ions(self):
+        for _ion in self._ions:
+            plt_indices_bond(_ion.mol)
+
+    def get_all_fragments(self) -> list[Fragment]:
+        fragments: list[Fragment] = []
+        for parent_ion in self._ions:
+            fragments.append(parent_ion)
+            fragments.extend(
+                parent_ion.get_all_fragments(
+                    max_recursion_depth=self.max_recursion_depth,
+                    cleavage_types=self.cleavage_types
+                )
+            )
+        return fragments
+
+    def plot_ms2(self, fig=None, res_pixels_parent=5000, **kwargs):
+        if fig is None:
+            fig, axs = plt.subplots(nrows=3)
+        else:
+            axs = fig.get_axes()
+            assert len(axs) >= 3
+
+        img = mol_to_img(self.mol, res_pixels=res_pixels_parent)
+        axs[0].imshow(img)
+        axs[0].axis('off')
+
+        frags = self.get_all_fragments()
+        frags_sorted = _fragments_sort_by_charge(frags)
+
         frags_plot = []
+        # deduplicate with formulas
         cds_plot: set[CompoundDict] = set()
-        for frag in frags:
+        for frag in frags_sorted['positive']:
             f = CompoundDict(frag.formula)
             if f not in cds_plot:
                 cds_plot.add(f)
                 frags_plot.append(frag)
-        plot_ms2_prediction(self.root.ion, frags_plot)
+        plot_ms2_prediction(fragments=frags_plot, ax=axs[1], **kwargs)
+        axs[1].set_title('Positive fragments')
+
+        frags_plot = []
+        # deduplicate with formulas
+        cds_plot: set[CompoundDict] = set()
+        for frag in frags_sorted['neutral']:
+            f = CompoundDict(frag.formula)
+            if f not in cds_plot:
+                cds_plot.add(f)
+                frags_plot.append(frag)
+        plot_ms2_prediction(fragments=frags_plot, ax=axs[2], **kwargs)
+        axs[2].set_title('Neutral fragments')
+
+        # equal scaling for axes
+        xmin1, xmax1 = axs[1].get_xlim()
+        xmin2, xmax2 = axs[2].get_xlim()
+        xmin = min(xmin1, xmin2)
+        xmax = max(xmax1, xmax2)
+        span = xmax - xmin
+        for i in [1, 2]:
+            axs[i].set_xlim((xmin - .05 * span, xmax + .05 * span))
+
+        return fig
 
 
-def _get_fragments(
-        parent_ion: Fragment,
-        keep_neutral=False,
-        max_recursion_depth=3,
-        _current_recursion_depth=0
+def predict_ms2(
+        mol: Mol, adduct_type: str, **kwargs
 ) -> list[Fragment]:
-    """Split mol at cleavage pos. C atom gets positive charge.
-
-    :returns
-    a list of tuples in which the first entry is the positive and the second
-    the neutral fragment.
-    """
-
-    def _process_fragments(fragments: list[Mol]) -> list[Fragment]:
-        processed = [
-            Fragment(mol=frag, recursion_depth=_current_recursion_depth)
-            for frag in fragments
-        ]
-        return processed
-
-    mol = parent_ion.mol
-    inchkeys = set()
-    fragments = []
-
-    cleavage_pos = _find_cleavage_bonds(mol)
-    for k, bonds in cleavage_pos.items():
-        for bond in bonds:
-            if keep_neutral:
-                # fragments_neut.extend(split_bond(mol, *bond))
-                _frags: list[Mol] = split_bond(mol, *bond)
-                _frags: list[Fragment] = _process_fragments(_frags)
-            else:
-                for is_inductive in [True, False]:
-                    _frags: list[Mol] = get_inductively_cleaved(
-                        mol, *bond, is_inductive=is_inductive
-                    )
-                    _frags: list[Fragment] = _process_fragments(_frags)
-                    # only append fragments when the inchkey does not exist yet
-                    for _frag in _frags:
-                        if _frag.inchkey in inchkeys:
-                            continue
-                        fragments.append(_frag)
-                        inchkeys.add(_frag.inchkey)
-                        # enter recursive call if fragment is positive and max
-                        # recursion depth is not reached yet
-    return fragments
+    """Predict characteristic fragments for a given molecule with specified adduct type. """
+    tree = FragmentTree(mol, adduct_type=adduct_type, **kwargs)
+    frags = tree.get_all_fragments()
+    return _fragments_sort_by_charge(frags)['positive']
 
 
-def _predict_ms2(
-        *,
-        mol: Mol = None,
-        smiles: str = None,
-        adduct: str = None,
-        **kwargs
-) -> list[Fragment]:
-    """Generate the fragment spectrum for a smiles. Assumes molecule is protonated."""
-    # TODO: use FragmentTree instead
-    if mol is None:
-        assert smiles is not None
-        mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    out = get_fragments(mol, **kwargs)
-
-    # TODO: implement for different adduct types
-    if adduct is None:
-        adduct_mass = MASS_PROTON
-
-    parent_ion = add_adduct_to_heteroatom(mol)
-    parent_fragment = Fragment(parent_ion, recursion_depth=0)
-    fragments = [parent_fragment]
-    for ik, frag, charge_type, i, rd in zip(*out):
-        if charge_type != 'positive':
-            continue
-        fragments.append(Fragment(mol=frag, recursion_depth=rd))
-    return fragments
-
-
-def _predict_losses(smiles: str, **kwargs) -> dict[float, Mol]:
-    mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    frags = get_fragments(mol, **kwargs)
-
-    desc = [add_adduct_to_heteroatom(mol)]
-    mzs = [ExactMolWt(desc[0])]
-    for t in frags:
-        frag = t[1]
-        if frag is None:
-            continue
-        mz = ExactMolWt(frag)
-        mzs.append(mz)
-        desc.append(frag)
-
-    return dict(zip(mzs, desc))
-
-
-def get_neutral_equivalents_for_predicted_ms2(smiles):
-    """Instead of the protonated fragments, this returns the neutral molecules
-    for better substructure match"""
-    mol: Mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    cleavage_pos = _find_cleavage_bonds(mol)
-    predicted = predict_ms2(smiles)
-    neutral_frags_conv: list[tuple[Mol, Mol]] = get_fragments(
-        mol, cleavage_pos, keep_neutral=True
-    )
-    # deconvolute
-    neutral_frags: list[Mol] = []
-    for neuts in neutral_frags_conv:
-        neutral_frags.extend(neuts)
-
-    neutral_equivalents = {}
-    for mz, mol in predicted.items():
-        dists = np.array([np.abs((mz - MASS_PROTON) - ExactMolWt(neut))
-                          for neut in neutral_frags])
-        closest_idx = np.argmin(dists)
-        print(dists, closest_idx)
-        dist = dists[closest_idx]
-        if dist > 1e-3:
-            warnings.warn(f'found large deviation for {smiles=} and {mz=}')
-        neutral_equivalents[mz] = neutral_frags[closest_idx]
-    return neutral_equivalents
+def predict_losses(
+        mol: Mol, adduct_type: str, **kwargs
+):
+    tree = FragmentTree(mol, adduct_type=adduct_type, **kwargs)
+    frags = tree.get_all_fragments()
+    return _fragments_sort_by_charge(frags)['neutral']
 
 
 def test_inductive_cleavage_simple():
@@ -478,17 +432,95 @@ def test_inductive_cleavage_simple():
     frags = get_inductively_cleaved(mol, 1, 2, plts=True)
 
 
+def testing_get_comp(adduct_pos: Literal['head', 'chain'], plts=False):
+    from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
+
+    if adduct_pos == 'head':
+        adduct_idx = 10
+    elif adduct_pos == 'chain':
+        adduct_idx = 14
+    else:
+        raise ValueError('adduct_pos must be "head" or "chain"')
+
+    name = 'PC DAG C15:0 C15:0'
+    mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=False)
+
+    mol_with_adduct = get_mol_with_adduct(mol, add='[M+NH4]+', return_mode='index', idx=adduct_idx)
+    if plts:
+        plt_indices_bond(mol_with_adduct)
+
+    return mol_with_adduct
+
+
+def test_inductive_cleavage_head():
+    mol_with_adduct = testing_get_comp(adduct_pos='head', plts=False)
+    mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
+    plt_indices_bond(mol_with_h_plus)
+    pos = _find_cleavage_positions(mol_with_h_plus)
+    assert (11, 10) in pos['INDUCTIVE']
+
+    cleaved = get_inductively_cleaved(mol_with_h_plus, 11, 10)
+    plt_indices_bond(cleaved)
+
+    # cleave at OP
+    cleaved = get_inductively_cleaved(mol_with_h_plus, 7, 10)
+    plt_indices_bond(cleaved)
+
+
+def test_inductive_cleavage_chain():
+    mol_with_adduct = testing_get_comp(adduct_pos='chain', plts=False)
+    mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
+    plt_indices_bond(mol_with_h_plus)
+
+    pos = _find_cleavage_positions(mol_with_h_plus)
+    assert (15, 14) in pos['INDUCTIVE']
+
+    cleaved = get_inductively_cleaved(mol_with_h_plus, 15, 14)
+    plt_indices_bond(cleaved)
+
+
 if __name__ == "__main__":
-    name = 'AR'
-    # max_recursion_depth = 1
-    # mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=True)
+    # TODO: beta-H rearrangement: need O[H+]CC, H jumps from further C to O, bond between OC is broken, double bond between CC
+    pass
+    # test_inductive_cleavage_head()
+    # test_inductive_cleavage_chain()
+
+    from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
+
+    # inductive cleavage works for all head pieces tested
+    name = 'PG DAG C16:0 C16:0'
+    mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=False)
+    plt_indices_bond(mol)
+    # plt.show()
+    # plt.pause(1)
+    #
+    # adduct_pos = int(input('Adduct position: '))
+    #
+    # mol_with_adduct = get_mol_with_adduct(mol, add='[M+NH4]+', return_mode='index', idx=adduct_pos)
+    # mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
+    # plt_indices_bond(mol_with_h_plus)
+    #
+    # print(ExactMolWt(mol_with_h_plus))
+    # print(rdMolDescriptors.CalcMolFormula(mol_with_h_plus))
+
+    # pos = _find_cleavage_positions(mol_with_h_plus)
+    #
+    # for p in pos['SIGMA']:
+    #     # frags = get_inductively_cleaved(mol_with_h_plus, *p)
+    #     # frags = get_alpha_cleaved(mol_with_h_plus, *p)
+    #     frags = get_sigma_cleaved(mol_with_h_plus, *p)
+    #     plt_indices_bond(frags)
+
+    # frag = Fragment(mol=mol_with_h_plus)
+    # frag.get_child_fragments(only_inductive=False)
 
     # print(Chem.MolToSmiles(mol))
     # M = ExactMolWt(mol)
     # f = rdMolDescriptors.CalcMolFormula(mol)
 
-    tree = FragmentTree.from_ipl_name(name, max_recursion_depth=0, only_inductive=False)
-    tree.plot_ms2()
+    tree = FragmentTree(mol, adduct_type='M+', max_recursion_depth=1)
+    # tree.plot_ions()
+    fig = tree.plot_ms2(add_struct_plots=False)
 
     # plt_indices_bond([mol])
     # cleavage_pos = find_cleavage_bonds(mol)
