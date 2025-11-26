@@ -50,6 +50,7 @@ import numpy as np
 import rdkit
 import logging
 from rdkit import Chem
+from rdkit.Chem.Descriptors import ExactMolWt
 
 from rdkit.Chem.rdchem import Mol, Atom, EditableMol
 from rdkit.Chem import rdMolDescriptors
@@ -743,7 +744,7 @@ if __name__ == '__main__':
     # mol = ipl_automatic_bonds('PE,AEG,C0:0,C10:0'.split(','), plts=True, idx_plt=True,
     #                           split_chain=False, sort_chains=False)
     # mol = ipl_automatic_bonds('SQ DAG C22:0 C6:0'.split(), plts=True, idx_plt=False)
-    mol = ipl_automatic_bonds('1G DAG C33:1'.split(), plts=False, idx_plt=False, split_chain=True)
+    mol = ipl_automatic_bonds('PG AEG C32:0'.split(), plts=False, idx_plt=False, split_chain=True)
 
     mplt_mol(mol)
 
@@ -751,6 +752,6 @@ if __name__ == '__main__':
     #
     # add_proton_to_heteroatom(mol)
     #
-    # print(Chem.MolToSmiles(mol))
-    # print(ExactMolWt(mol))
-    # print(rdMolDescriptors.CalcMolFormula(mol))
+    print(Chem.MolToSmiles(mol))
+    print(ExactMolWt(mol))
+    print(rdMolDescriptors.CalcMolFormula(mol))

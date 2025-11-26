@@ -1,4 +1,5 @@
 import io
+from typing import Iterable
 
 from PIL import Image
 from matplotlib import pyplot as plt
@@ -36,8 +37,11 @@ def mplt_mol(mol: Mol, res_pixels=1000, **kwargs):
     return fig, ax
 
 
-def plt_indices_bond(mols):
-    combo: Mol = get_combined(mols)
+def plt_indices_bond(mols: Iterable[Mol] | Mol):
+    if isinstance(mols, Mol):
+        combo = mols
+    else:
+        combo: Mol = get_combined(mols)
     combo = add_indices(combo)
 
     mplt_mol(combo)

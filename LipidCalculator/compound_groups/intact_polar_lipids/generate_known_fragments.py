@@ -9,9 +9,9 @@ from rdkit.Chem.Descriptors import ExactMolWt
 from tqdm import tqdm
 
 from LipidCalculator.compound_creation.formula_parser import CompoundDict
-from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import predict_ms2, \
+from LipidCalculator.cleaving.generate_fragments import predict_ms2, \
     plot_ms2_prediction, \
-    get_neutral_equivalents_for_predicted_ms2, predict_losses
+    predict_losses
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import ABBREVIATION_TO_GROUP
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds, get_mol_from_abbr, \
     CHAIN_EMPTY_PLACEHOLDER

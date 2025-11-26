@@ -9,11 +9,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from tqdm import tqdm
 
-from LipidCalculator.compound_groups.intact_polar_lipids.frag_from_alpha_cleavage import get_fragments, \
-    add_proton_to_heteroatom
-from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import get_mol_from_abbr, ipl_automatic_bonds
+from LipidCalculator.cleaving.generate_fragments import get_fragments
+from LipidCalculator.adduct.rdkit_add_adduct import add_adduct_to_heteroatom
+from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import ABBREVIATION_TO_GROUP
-from LipidCalculator.compound_groups.to_sql import submit_to_db, submit_to_db_inside_session
+from LipidCalculator.compound_groups.to_sql import submit_to_db_inside_session
 
 chain1s = [f'C{i}:0' for i in range(6, 31, 1)] + [f'C{i}:1' for i in range(6, 31, 1)]
 chain2s = [f'C{i}:0' for i in range(6, 31, 1)] + [f'C{i}:1' for i in range(6, 31, 1)]
@@ -67,7 +67,7 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
         )
         # only H+ adduct for now
         # TODO: other adducts
-        mol_with_adduct = to_orm_mol(add_proton_to_heteroatom(compound_mol))
+        mol_with_adduct = to_orm_mol(add_adduct_to_heteroatom(compound_mol))
         ions = [
             IonPeak(adduct='[M+H]+',
                     mz=mol_with_adduct.M / mol_with_adduct.charge,
@@ -106,19 +106,13 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
 
 
 restart = True
-is_test = True
-folder = r'\\hlabstorage.dmz.marum.de\scratch\Yannick\compounds\LipidCalculator'
-# folder = r"C:\Users\Yannick Zander\Downloads"
-if is_test:
-    db_path = os.path.join(folder, 'database_test.db')
-    log_file_errs = os.path.join(folder, 'errors_test.log')
-    log_file_suc = os.path.join(folder, 'created_test.log')
-    chain1s = chain1s[:2]
-    chain2s = chain2s[:2]
-else:
-    db_path = os.path.join(folder, 'database.db')
-    log_file_errs = os.path.join(folder, 'errors.log')
-    log_file_suc = os.path.join(folder, 'created.log')
+
+# folder = r'\\hlabstorage.dmz.marum.de\scratch\Yannick\compounds\LipidCalculator'
+folder = r"C:\Users\Yannick Zander\Downloads"
+db_path = os.path.join(folder, 'database.db')
+
+log_file_errs = os.path.join(folder, 'errors.log')
+log_file_suc = os.path.join(folder, 'created.log')
 
 if restart:
     if os.path.exists(db_path):

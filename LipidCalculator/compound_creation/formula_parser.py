@@ -500,7 +500,12 @@ if __name__ == '__main__':
 
     # test_neg()
 
-    parse_formula('H+H')
+    e_plus = CompoundDict('H-').mass - CompoundDict('H').mass
+    formula_c37_3 = 'C37H70ONa'
+    formula_cren = 'C82H154O6Na'
+    mz_C37_3 = CompoundDict(formula_c37_3).mass - e_plus
+    mz_cren = CompoundDict(formula_cren).mass - e_plus
+    # parse_formula('H+H')
 
     # for i in range(5):
     #     test_performance()
