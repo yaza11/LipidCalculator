@@ -24,9 +24,9 @@ def parse_charge(c: str):
 
 def get_adduct_mass_and_charge(
         ipt: str,
-        format_template: Literal['metaboscape', 'simple'] = 'metaboscape'
+        format_template: Literal['metaboscape', 'simple', 'square_bracket'] = 'metaboscape'
 ) -> tuple[float, int]:
-    if format_template == 'metaboscape':
+    if format_template in ('metaboscape', 'square_bracket'):
         add, charge = metaboscape_extract_adduct_and_charge(ipt)
     elif format_template == 'simple':
         add, charge = parse_charge(ipt)
