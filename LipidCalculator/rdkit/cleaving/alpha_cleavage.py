@@ -1,16 +1,17 @@
 """Radical on functional group initiates sigma bond cleavage on alpha carbon"""
 from rdkit import Chem
-from rdkit.Chem import Mol, Atom
+from rdkit.Chem import Mol, Atom, AddHs
 
-from LipidCalculator.cleaving.util import SUPPORTED_HETEROATOMS
+from LipidCalculator.rdkit.cleaving.util import SUPPORTED_HETEROATOMS
 from LipidCalculator.rdkit.plotting import plt_indices_bond
-from LipidCalculator.rdkit.util import bump_bond_order
+from LipidCalculator.rdkit.util import bump_bond_order, check_hs_treated_as_neighbors
 
 
 def find_alpha_cleavage_positions(mol: Chem.Mol) -> list[tuple[int, int]]:
     # need heteroatom with radical and charge
     # need alpha carbon next to it
     # need another carbon next to alpha carbon
+    assert check_hs_treated_as_neighbors(mol)
 
     possible_alpha_cleavage_positions: list[tuple[int, int]] = []
     for atom in mol.GetAtoms():
@@ -31,6 +32,7 @@ def find_alpha_cleavage_positions(mol: Chem.Mol) -> list[tuple[int, int]]:
 
 
 def get_alpha_cleaved(mol: Mol, atom_charged_radical_idx: int, atom_accepting_radical_idx: int):
+    assert check_hs_treated_as_neighbors(mol)
     assert mol.GetAtomWithIdx(atom_charged_radical_idx).GetNumRadicalElectrons() > 0, 'Atom should have radical'
 
     rw_mol = Chem.RWMol(Mol(mol))
@@ -63,15 +65,16 @@ def get_alpha_cleaved(mol: Mol, atom_charged_radical_idx: int, atom_accepting_ra
     # rw_mol = Chem.AddHs(rw_mol)
     # Get fragments as separate Mols
     frags = Chem.GetMolFrags(rw_mol, asMols=True, sanitizeFrags=True)
-    return frags
+    assert len(frags) == 2
+    return [AddHs(f) for f in frags]
 
 
 if __name__ == "__main__":
     # reproducing example from https://en.wikipedia.org/wiki/Fragmentation_(mass_spectrometry)
-    mol = Chem.MolFromSmiles("CCC([OH+])CC")
-    plt_indices_bond([mol])
+    mol = AddHs(Chem.MolFromSmiles("CCC([OH+])CC"))
+    plt_indices_bond([mol], remove_hs=False)
 
     print(find_alpha_cleavage_positions(mol))
 
     frags = get_alpha_cleaved(mol, 3, 1)
-    plt_indices_bond(frags)
+    plt_indices_bond(frags, remove_hs=False)

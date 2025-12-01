@@ -6,25 +6,28 @@ import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from rdkit import Chem
-from rdkit.Chem import Mol, rdMolDescriptors, inchi, GetFormalCharge, RWMol, Atom, ValenceType, AddHs
+from rdkit.Chem import Mol, rdMolDescriptors, inchi, GetFormalCharge, RWMol, Atom, AddHs, BondType
 from rdkit.Chem.Descriptors import ExactMolWt
+from rdkit.Chem.rdmolops import SanitizeMol
 
 from LipidCalculator import CompoundDict
-from LipidCalculator.adduct.rdkit_add_adduct import get_mol_with_adduct, steal_charge_from_adduct, \
-    find_adduct_positions, add_formal_charge_for_atom, find_available_bond_locations_for_adduct
-from LipidCalculator.cleaving.alpha_cleavage import find_alpha_cleavage_positions, get_alpha_cleaved
-from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved, find_inductive_cleavage_positions
-from LipidCalculator.cleaving.sigma_cleavage import find_sigma_cleavage_positions, get_sigma_cleaved
+from LipidCalculator.rdkit.adduct.util import get_mol_with_adduct, add_formal_charge_for_atom, \
+    find_available_bond_locations_for_adduct, steal_pos_charge_from_adduct
+
+from LipidCalculator.rdkit.cleaving.alpha_cleavage import find_alpha_cleavage_positions, get_alpha_cleaved
+from LipidCalculator.rdkit.cleaving.inductive_cleavage import get_inductively_cleaved, find_inductive_cleavage_positions
+from LipidCalculator.rdkit.cleaving.sigma_cleavage import find_sigma_cleavage_positions, get_sigma_cleaved
 from LipidCalculator.rdkit.plotting import mol_to_img, plt_indices_bond
 import logging
 
-from LipidCalculator.rdkit.util import get_num_hs, remove_one_h_for_atom
+from LipidCalculator.rdkit.util import get_num_hs, remove_one_h_for_atom, check_hs_treated_as_neighbors, \
+    add_one_h_for_atom
 
 logger = logging.getLogger(__name__)
 
-DEBUG_SPLITTING = True
+DEBUG_SPLITTING = False
 DEBUG_IONS = False
-DEBUG_CHARGE_MOVEMENT = False
+DEBUG_CHARGE_MOVEMENT = True
 
 CLEAVAGE_TYPES = ['SIGMA', 'INDUCTIVE', 'ALPHA']
 CleavageType: type = Literal[*CLEAVAGE_TYPES]
@@ -163,7 +166,7 @@ def plot_ms2_prediction(
     return ax
 
 
-def _find_movable_charges(mol: Mol, charge_type: ChargeType, plts=False) -> list[int]:
+def _find_movable_charges(mol: Mol, charge_type: ChargeType, as_h_plus: bool, plts=False) -> list[int]:
     """Find atoms whose formal charge can be removed"""
 
     def _is_charge_right(atm: Atom) -> bool:
@@ -177,9 +180,10 @@ def _find_movable_charges(mol: Mol, charge_type: ChargeType, plts=False) -> list
     def _is_charge_movable(atm: Atom) -> bool:
         """This is only the case if there is an h atom or a radical"""
         # TODO: is this really required
-        can_compensate_valence = (atm.GetNumRadicalElectrons() > 0) or (
-                get_num_hs(atm) > 0)
-        return can_compensate_valence
+        if as_h_plus:
+            return _find_movable_h_for_atom(mol, atm.GetIdx()) is not None
+        else:
+            return atm.GetNumRadicalElectrons() > 0
 
     candidates: list[int] = []
     for idx, atom in enumerate(mol.GetAtoms()):
@@ -191,7 +195,20 @@ def _find_movable_charges(mol: Mol, charge_type: ChargeType, plts=False) -> list
     return candidates
 
 
-def _move_charge(mol: Mol, idx_start, idx_end, as_h_plus: bool, plts=False):
+def _find_movable_h_for_atom(mol, idx_atom: int) -> int | None:
+    atom = mol.GetAtomWithIdx(idx_atom)
+    for pot_h in atom.GetNeighbors():
+        if pot_h.GetSymbol() != 'H':
+            continue
+        if pot_h.GetFormalCharge() != 0:
+            continue
+        if pot_h.GetNumRadicalElectrons() != 0:
+            continue
+        return pot_h.GetIdx()
+    return None
+
+
+def _move_charge(mol: Mol, idx_start, idx_end, as_h_plus: bool):
     rw_mol = RWMol(Mol(mol))
 
     atom_with_charge = rw_mol.GetAtomWithIdx(idx_start)
@@ -200,26 +217,35 @@ def _move_charge(mol: Mol, idx_start, idx_end, as_h_plus: bool, plts=False):
     # remove charge
     c = atom_with_charge.GetFormalCharge()
     atom_with_charge.SetFormalCharge(0)
+    # we also need to account for radicals since removing a charge will also
+    # remove or create a radical electron
+    if not as_h_plus:
+        old_num_radicals = atom_with_charge.GetNumRadicalElectrons() % 2
+        atom_with_charge.SetNumRadicalElectrons((old_num_radicals + 1) % 2)
     # add charge
     atom_getting_charge.SetFormalCharge(c)
+    if not as_h_plus:
+        old_num_radicals = atom_getting_charge.GetNumRadicalElectrons() % 2
+        atom_getting_charge.SetNumRadicalElectrons((old_num_radicals + 1) % 2)
 
-    new_mol = add_formal_charge_for_atom(mol=rw_mol, atom_idx=idx_end, add_H=as_h_plus)
-    # need to remove H after since this will change the indices
-    remove_one_h_for_atom(new_mol, idx_start)
+    if as_h_plus:
+        assert (h_idx := _find_movable_h_for_atom(mol, idx_start)) is not None, \
+            f'cannot remove H atom on atom with idx {idx_start}'
+        # print(f'removing bond between {atom_with_charge.GetIdx(), h_idx}')
+        rw_mol.RemoveBond(atom_with_charge.GetIdx(), h_idx)
+        # print(f'adding bond between {atom_getting_charge.GetIdx(), h_idx}')
+        rw_mol.AddBond(atom_getting_charge.GetIdx(), h_idx, order=Chem.BondType.SINGLE)
+        # print([at.GetIdx() for at in atom_getting_charge.GetNeighbors()])
+    mol = rw_mol.GetMol()
+    SanitizeMol(mol)
 
-    if plts:
-        fig, ax = plt.subplots()
-        plt_indices_bond(mol, ax=ax)
-        ax.set_title(f'attempting to move charge from {idx_start} to {idx_end}')
-        plt.show()
-    print(f'final radicals on charged: {new_mol.GetAtomWithIdx(idx_start).GetNumRadicalElectrons()}')
-    print(f'final Hs on charged: {new_mol.GetAtomWithIdx(idx_start).GetNumExplicitHs()}')
-    if failed:
-        raise ValueError()
-    return new_mol
+    if as_h_plus:
+        # for PI AR it looks like there is no bond after all, but seems to be a drawing bug
+        assert mol.GetBondBetweenAtoms(atom_getting_charge.GetIdx(), h_idx).GetBondType() == Chem.BondType.SINGLE
+    return mol
 
 
-def _figure_wait_unit_pressed(fig):
+def _figure_wait_until_pressed(fig):
     plt.show(block=False)
     print("Press any key or click in the plot window to continue (don't close the figure!)...")
     plt.waitforbuttonpress()  # waits indefinitely for a key press or mouse click
@@ -255,6 +281,11 @@ class Fragment:
             charge_movement_as_h_plus: bool = False,
     ):
         assert allow_charge_relocation is not None
+        if not check_hs_treated_as_neighbors(mol):
+            print('this molecule does not conform with the explicit H rule:')
+            plt_indices_bond(mol, remove_hs=False)
+            plt.show()
+        assert check_hs_treated_as_neighbors(mol)
         self.mol = mol
         self.recursion_depth = recursion_depth
         self.probability = probability
@@ -340,7 +371,7 @@ class Fragment:
                         fig.suptitle(
                             f'Splitting of molecule at {position} with {cleavage_type}'
                         )
-                        _figure_wait_unit_pressed(fig)
+                        _figure_wait_until_pressed(fig)
 
                 except Exception as e:
                     print(e)
@@ -373,46 +404,48 @@ class Fragment:
                     else:
                         logger.info('not skipping charge relocation')
                     movable_charges = _find_movable_charges(
-                        frag.mol, charge_type='positive'
+                        frag.mol,
+                        charge_type='positive',
+                        as_h_plus=self.charge_movement_as_h_plus
                     )
-                    logger.info(f'found {len(movable_charges)} possible other charge position(s)')
+                    logger.info(f'found {len(movable_charges)} possible other charge position(s) at {movable_charges}')
                     assert len(movable_charges) <= 1, \
                         'not expecting and cannot handle multiple movable charges'
                     if len(movable_charges) == 0:
                         continue
-                    idx_charge = movable_charges[0]
+                    for idx_charge in movable_charges:
+                        idcs_destination = find_available_bond_locations_for_adduct(frag.mol)
+                        logger.info(f'possible target idcs for the charge are {idcs_destination}')
+                        for idx_destination in idcs_destination:
+                            if DEBUG_CHARGE_MOVEMENT:
+                                fig, axs = plt.subplots(nrows=2)
+                                fig.suptitle(
+                                    f'Charge moved from {idx_charge} to {idx_destination} (as H+={self.charge_movement_as_h_plus})')
+                                plt_indices_bond(frag.mol, ax=axs[0], remove_hs=False)
+                            mol_with_moved_charge: Mol = _move_charge(
+                                frag.mol,
+                                idx_charge,
+                                idx_destination,
+                                as_h_plus=self.charge_movement_as_h_plus
+                            )
+                            if DEBUG_CHARGE_MOVEMENT:
+                                plt_indices_bond(mol_with_moved_charge, ax=axs[1], remove_hs=False)
+                                _figure_wait_until_pressed(fig)
 
-                    idcs_destination = find_available_bond_locations_for_adduct(frag.mol)
-                    for idx_destination in idcs_destination:
-                        if DEBUG_CHARGE_MOVEMENT:
-                            fig, axs = plt.subplots(nrows=2)
-                            fig.suptitle(
-                                f'Charge moved from {idx_charge} to {idx_destination} (as H+={self.charge_movement_as_h_plus})')
-                            plt_indices_bond(frag.mol, ax=axs[0])
-                        mol_with_moved_charge = _move_charge(
-                            frag.mol,  # need to create copy
-                            idx_charge,
-                            idx_destination,
-                            as_h_plus=self.charge_movement_as_h_plus
-                        )
-                        if DEBUG_CHARGE_MOVEMENT:
-                            plt_indices_bond(mol_with_moved_charge, ax=axs[1])
-                            _figure_wait_unit_pressed(fig)
-
-                        frag_charged: Fragment = Fragment(
-                            mol=mol_with_moved_charge,
-                            recursion_depth=self.recursion_depth + 1,
-                            cleavage_type=cleavage_type,
-                            probability=self.probability * .8 ** 2,
-                            allow_charge_relocation=self.allow_charge_relocation
-                        )
-                        frag_charged._set_child_fragments(
-                            max_recursion_depth=max_recursion_depth,
-                            cleavage_types=cleavage_types
-                        )
-                        # need to link modified fragments to this fragment,
-                        # even though the composition is almost the same
-                        self._child_fragments.append(frag_charged)
+                            frag_charged: Fragment = Fragment(
+                                mol=mol_with_moved_charge,
+                                recursion_depth=self.recursion_depth + 1,
+                                cleavage_type=cleavage_type,
+                                probability=self.probability * .8 ** 2,
+                                allow_charge_relocation=self.allow_charge_relocation
+                            )
+                            frag_charged._set_child_fragments(
+                                max_recursion_depth=max_recursion_depth,
+                                cleavage_types=cleavage_types
+                            )
+                            # need to link modified fragments to this fragment,
+                            # even though the composition is almost the same
+                            self._child_fragments.append(frag_charged)
 
     def get_child_fragments(
             self, cleavage_types: list[CleavageType], max_recursion_depth: int = 1,
@@ -497,7 +530,7 @@ class FragmentTree:
         if 'H' in adduct_type:
             _keep_hs.append(True)
 
-        _adduct_positions: list[int] = find_adduct_positions(self.mol)
+        _adduct_positions: list[int] = find_available_bond_locations_for_adduct(self.mol)
         self._ions: list[Fragment] = []
         self._ion_location_and_types: list[tuple[int, str, bool]] = []
 
@@ -509,7 +542,7 @@ class FragmentTree:
                 if adduct_type == 'M+':  # nothing to steal from
                     _mol_with_h_plus = _mol_with_adduct
                 else:
-                    _mol_with_h_plus = steal_charge_from_adduct(
+                    _mol_with_h_plus = steal_pos_charge_from_adduct(
                         _mol_with_adduct, keep_h=_keep_h, plts=False
                     )
                 self._ions.append(
@@ -541,7 +574,7 @@ class FragmentTree:
             fig.suptitle(
                 f'Ion with {_type} adduct at idx {_pos} (H was {'' if _keep_h else 'not '}kept, m/z={_ion.mz:.4f}, f={_ion.formula})')
             if DEBUG_IONS:
-                _figure_wait_unit_pressed(fig)
+                _figure_wait_until_pressed(fig)
 
     def get_all_fragments(self) -> list[Fragment]:
         logger.info('getting all fragments')
@@ -635,7 +668,7 @@ def testing_get_comp(adduct_pos: Literal['head', 'chain'], plts=False):
 
 def test_inductive_cleavage_head():
     mol_with_adduct = testing_get_comp(adduct_pos='head', plts=False)
-    mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
+    mol_with_h_plus = steal_pos_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
     plt_indices_bond(mol_with_h_plus)
     pos = _find_cleavage_positions(mol_with_h_plus)
     assert (11, 10) in pos['INDUCTIVE']
@@ -650,7 +683,7 @@ def test_inductive_cleavage_head():
 
 def test_inductive_cleavage_chain():
     mol_with_adduct = testing_get_comp(adduct_pos='chain', plts=False)
-    mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
+    mol_with_h_plus = steal_pos_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
     plt_indices_bond(mol_with_h_plus)
 
     pos = _find_cleavage_positions(mol_with_h_plus)
@@ -675,9 +708,47 @@ def test_sanitize_remove_hs():
     plt_indices_bond(mol___, remove_hs=False)
 
 
+def test_charge_movement():
+    from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
+    adduct_type = '[M+NH4]+'
+    name = 'PI OH-AR'
+    keep_h = True
+
+    fig, axs = plt.subplots(2, 2)
+
+    _mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=False)
+    mol = AddHs(_mol)
+    plt_indices_bond(mol, ax=axs[0, 0], remove_hs=False)
+    axs[0, 0].set_title(name)
+
+    _adduct_positions: list[int] = find_available_bond_locations_for_adduct(mol)
+    _mol_with_adduct = get_mol_with_adduct(
+        mol, add=adduct_type, return_mode='index', idx=_adduct_positions[0]
+    )
+    plt_indices_bond(_mol_with_adduct, ax=axs[0, 1], remove_hs=False)
+    axs[0, 1].set_title(f'{name} with {adduct_type}')
+
+    _mol_with_h_plus = steal_pos_charge_from_adduct(
+        _mol_with_adduct, keep_h=keep_h, plts=False
+    )
+    plt_indices_bond(_mol_with_h_plus, ax=axs[1, 0], remove_hs=False)
+    axs[1, 0].set_title(f'{name} with charge stolen from {adduct_type} (H was {'' if keep_h else 'not '}kept)')
+
+    other_positions = find_available_bond_locations_for_adduct(_mol_with_h_plus)
+    charge_pos = _find_movable_charges(_mol_with_h_plus, charge_type='positive', as_h_plus=keep_h)
+    _mol_with_charge_relocated = _move_charge(
+        _mol_with_h_plus, charge_pos[0], other_positions[0], as_h_plus=keep_h)
+    plt_indices_bond(_mol_with_charge_relocated, ax=axs[1, 1], remove_hs=False, res_pixels=5000)
+    axs[1, 1].set_title(
+        f'charge moved from {charge_pos[0]} to {other_positions[0]} (H was {'' if keep_h else 'not '}kept)')
+    # print(Chem.GetMolFrags(_mol_with_charge_relocated, asMols=True))
+    plt.show()
+
+
 if __name__ == "__main__":
     # TODO: beta-H rearrangement: need O[H+]CC, H jumps from further C to O, bond between OC is broken, double bond between CC
     pass
+    # test_charge_movement()
     # test_inductive_cleavage_head()
     # test_inductive_cleavage_chain()
 
@@ -718,9 +789,9 @@ if __name__ == "__main__":
     tree = FragmentTree(
         mol,
         adduct_type='[M+H]+',
-        max_recursion_depth=2,
+        max_recursion_depth=1,
         allow_charge_relocation=True,
-        cleavage_types=None,
+        cleavage_types=['INDUCTIVE', 'ALPHA'],
     )
     # tree.plot_ions()
     fig = tree.plot_ms2(add_struct_plots=False, res_pixels_child=500)

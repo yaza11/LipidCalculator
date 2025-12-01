@@ -1,7 +1,59 @@
 from typing import Iterable
 
 from rdkit import Chem
-from rdkit.Chem import Mol
+from rdkit.Chem import Mol, Atom, RWMol
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def optional_copy_rwmol(mol: Mol, copy: bool) -> Mol:
+    if copy:
+        mol_new = Mol(mol)
+    else:
+        logger.warning('not copying not properly tested! expect the unexpected')
+        mol_new = mol
+    return Chem.RWMol(mol_new)
+
+
+def check_hs_treated_as_neighbors(mol) -> bool:
+    """Check that AddHs was called on molecule"""
+    mol.UpdatePropertyCache(strict=False)
+    no_hs = [(at.GetNumExplicitHs() + at.GetNumImplicitHs() == 0) for at in mol.GetAtoms()]
+    if all(no_hs):
+        return True
+    logger.warning(f'found atoms with explicit/implicit Hs (instead of neighbors): {no_hs.index(False)}')
+    return False
+
+
+def get_num_hs(atom: Atom) -> int:
+    return sum([at.GetAtomicNum() == 1 for at in atom.GetNeighbors()])
+
+
+def remove_one_h_for_atom(mol: Mol, idx: int, copy: bool = True) -> Mol:
+    assert check_hs_treated_as_neighbors(mol)
+    rw_mol = optional_copy_rwmol(mol, copy=copy)
+
+    atom = rw_mol.GetAtomWithIndex(idx)
+    assert get_num_hs(atom) > 0
+    for at in atom.GetNeighbors():
+        if at.GetSymbol() == "H":
+            jdx = at.GetIdx()
+            break
+    rw_mol.RemoveAtom(jdx)
+    return rw_mol.GetMol()
+
+
+def add_one_h_for_atom(mol: Mol, idx: int, copy: bool = True) -> tuple[Mol, int]:
+    assert check_hs_treated_as_neighbors(mol)
+    rw_mol = optional_copy_rwmol(mol, copy=copy)
+
+    at = Atom(1)
+    h_idx = rw_mol.AddAtom(at)
+    rw_mol.AddBond(idx, h_idx, Chem.BondType.SINGLE)
+    if copy:
+        return rw_mol, h_idx
+    return rw_mol.GetMol(), h_idx
 
 
 def add_indices(mol: Mol):
@@ -24,9 +76,11 @@ def get_combined(mols: Iterable[Mol]) -> Mol:
     """Turn multiple molecules into a single one. This does not add bonds between fragments."""
     if len(mols) == 0:
         return Mol()
-    _combo = mols[0]
+    elif len(mols) == 1:
+        return mols[0]
+    _combo = Mol(mols[0])
     for mol in mols[1:]:
-        _combo: Mol = Chem.CombineMols(_combo, mol)
+        _combo: Mol = Chem.CombineMols(_combo, mol)  #
     return _combo
 
 

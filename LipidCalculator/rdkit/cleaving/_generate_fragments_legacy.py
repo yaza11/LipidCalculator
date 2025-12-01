@@ -6,8 +6,8 @@ from rdkit import Chem
 from rdkit.Chem import Mol, EXPLICIT
 from rdkit.Chem.Descriptors import ExactMolWt
 
-from LipidCalculator.cleaving.generate_fragments import ChargeType, PERIODIC_TABLE, Fragment
-from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved
+from LipidCalculator.rdkit.cleaving.generate_fragments import ChargeType, PERIODIC_TABLE, Fragment
+from LipidCalculator.rdkit.cleaving.inductive_cleavage import get_inductively_cleaved
 from LipidCalculator.compound_groups.common_fragments import MASS_PROTON
 from LipidCalculator.rdkit.plotting import mplt_mol
 

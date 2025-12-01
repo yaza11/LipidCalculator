@@ -1,4 +1,4 @@
-from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved
+from LipidCalculator.rdkit.cleaving.inductive_cleavage import get_inductively_cleaved
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 from LipidCalculator.rdkit.plotting import plt_indices_bond
 
