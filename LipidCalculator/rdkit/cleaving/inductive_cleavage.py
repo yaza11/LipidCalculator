@@ -32,7 +32,7 @@ def get_inductively_cleaved(
     The other part (with the heteroatom) is considered the neutral loss
     """
     # Clone the molecule
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
 
     # Ensure atom1 is carbon, atom2 is heteroatom
     c_atom: Atom = rw_mol.GetAtomWithIdx(other_atom_idx)
@@ -43,6 +43,13 @@ def get_inductively_cleaved(
     assert hetero_atom.GetSymbol() in SUPPORTED_HETEROATOMS, \
         f'Heteroatom of type {hetero_atom.GetSymbol()} not supported (only {SUPPORTED_HETEROATOMS} are supported)'
     assert hetero_atom.GetFormalCharge() > 0, f'Formal charge of heteroatom should be greater than 0'
+
+    hetero_atom.SetNoImplicit(True)
+    c_atom.SetNoImplicit(True)
+
+    print(f'Hs before inductive cleavage: het: {hetero_atom.GetNumExplicitHs()}, c: {c_atom.GetNumExplicitHs()}')
+    print(
+        f'radicals before inductive cleavage: het: {hetero_atom.GetNumRadicalElectrons()}, c: {c_atom.GetNumExplicitHs()}')
 
     # heteroatom gains an electron from the double bond
     hetero_atom.SetFormalCharge(hetero_atom.GetFormalCharge() - 1)
@@ -56,6 +63,11 @@ def get_inductively_cleaved(
 
     # Sanitize before fragmenting
     Chem.SanitizeMol(rw_mol)
+
+    print(f'Hs after inductive cleavage: het: {hetero_atom.GetNumExplicitHs()}, c: {c_atom.GetNumExplicitHs()}')
+    print(
+        f'radicals after inductive cleavage: het: {hetero_atom.GetNumRadicalElectrons()}, c: {c_atom.GetNumExplicitHs()}')
+
     # Get fragments as separate Mols
     frags = Chem.GetMolFrags(rw_mol, asMols=True, sanitizeFrags=True)
     return frags
@@ -69,5 +81,5 @@ if __name__ == "__main__":
 
     print(find_inductive_cleavage_positions(mol))
 
-    # frags = get_inductively_cleaved(mol, c_atom_idx=1, hetero_atom_idx=2)
-    # plt_indices_bond(frags)
+    frags = get_inductively_cleaved(mol, 1, 2)
+    plt_indices_bond(frags)

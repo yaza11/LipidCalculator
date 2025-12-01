@@ -37,7 +37,7 @@ def _get_k_plus_adduct() -> Mol:
 
 def _get_ammonium_adduct() -> Mol:
     mol = Chem.MolFromSmiles('[NH3]')
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(mol)  #
 
     rw_mol.GetAtomWithIdx(0).SetFormalCharge(1)  # protonated hydrogen
     # bind H+ with hydrogen bond
@@ -67,11 +67,11 @@ def _get_adduct_as_mol(adduct_type: Literal[*SUPPORTED_ADDUCT_TYPES]) -> Mol:
 
 def add_formal_charge_for_atom(mol: Mol, atom_idx: int, add_H: bool = False):
     """increment charge for atom at specified index by 1 (making it more positive, so taking away an electron)"""
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
     at = rw_mol.GetAtomWithIdx(atom_idx)
     at.SetFormalCharge(at.GetFormalCharge() + 1)
-    if not add_H:
-        at.SetNumRadicalElectrons(at.GetNumRadicalElectrons() + 1)
+    if add_H:
+        at.SetNumExplicitHs(at.GetNumExplicitHs() + 1)
 
     mol_result = rw_mol.GetMol()
     Chem.SanitizeMol(mol_result)
@@ -82,20 +82,21 @@ def _set_m_plus_adduct(mol: Mol, atom_idx: int) -> Mol:
     return add_formal_charge_for_atom(mol=mol, atom_idx=atom_idx, add_H=False)
 
 
-def _find_available_bond_locations_for_adduct(mol) -> list[int]:
+def find_available_bond_locations_for_adduct(mol) -> list[int]:
     """Consider all heteroatoms as available bond locations."""
     heteroatoms: list[int] = [
         idx for idx, atom in enumerate(mol.GetAtoms())
         if atom.GetAtomicNum() not in [6, 1]
            and atom.GetFormalCharge() <= 0  # avoid overcharged species
+           and len(atom.GetNeighbors()) < 4  # sterically hindered
     ]
     return heteroatoms
 
 
 def _add_adduct_at_idx(mol: Mol, add: Mol, atom_idx: int, plts=False) -> Mol:
     n_atoms: int = len(mol.GetAtoms())
-    mol = Chem.CombineMols(mol, add)
-    rw_mol = Chem.RWMol(mol)
+    mol = Chem.CombineMols(Mol(mol), add)
+    rw_mol = Chem.RWMol(mol)  #
     # in combined molecule, indices are continued
     if plts:
         print(f'attempting to form bond between {atom_idx} and {n_atoms}')
@@ -116,7 +117,7 @@ def _add_adduct_to_heteroatom(
     # TODO: support for M+
 
     # Find all heteroatoms (not C or H)
-    available_indices: list[int] = _find_available_bond_locations_for_adduct(mol)
+    available_indices: list[int] = find_available_bond_locations_for_adduct(mol)
     if len(available_indices) == 0:
         raise ValueError(f'No available bond locations found for molecule with SMILES={Chem.MolToSmiles(mol)}')
 
@@ -136,7 +137,7 @@ def _increase_formal_charge(
         idx: int = None
 ) -> Mol | list[Mol]:
     """mimics M+ adduct"""
-    available_indices: list[int] = _find_available_bond_locations_for_adduct(mol)
+    available_indices: list[int] = find_available_bond_locations_for_adduct(mol)
 
     if return_mode == 'index':
         assert idx in available_indices
@@ -184,7 +185,7 @@ def steal_charge_from_adduct(mol_with_adduct: Mol, keep_h: bool, plts=False) -> 
     Break the hydrogen bond, modify charge and radical of heteroatom, remove rest of adduct.
     Warning: This function will add an h atom, regardless of whether one is present in the adduct if keep_h is set to True
     """
-    rw_mol = Chem.RWMol(mol_with_adduct)
+    rw_mol = Chem.RWMol(Mol(mol_with_adduct))
 
     # find the hydrogen bond between molecule and adduct
     for bond in mol_with_adduct.GetBonds():

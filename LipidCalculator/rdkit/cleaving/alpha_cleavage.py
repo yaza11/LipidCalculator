@@ -33,7 +33,7 @@ def find_alpha_cleavage_positions(mol: Chem.Mol) -> list[tuple[int, int]]:
 def get_alpha_cleaved(mol: Mol, atom_charged_radical_idx: int, atom_accepting_radical_idx: int):
     assert mol.GetAtomWithIdx(atom_charged_radical_idx).GetNumRadicalElectrons() > 0, 'Atom should have radical'
 
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
 
     # determine index of alpha carbon
     atom_charged_radical = rw_mol.GetAtomWithIdx(atom_charged_radical_idx)
@@ -73,5 +73,5 @@ if __name__ == "__main__":
 
     print(find_alpha_cleavage_positions(mol))
 
-    # frags = get_alpha_cleaved(mol, 3, 1)
-    # plt_indices_bond(frags)
+    frags = get_alpha_cleaved(mol, 3, 1)
+    plt_indices_bond(frags)

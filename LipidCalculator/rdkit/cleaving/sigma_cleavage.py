@@ -24,7 +24,7 @@ def get_sigma_cleaved(
     charged (otherwise we would not care about this bond in the fragment formation).
     """
     # Clone the molecule
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
 
     charged_atom: Atom = rw_mol.GetAtomWithIdx(charged_atom_idx)
     assert charged_atom.GetNumRadicalElectrons() > 0, 'charged atom must have a radical'
@@ -66,5 +66,5 @@ if __name__ == "__main__":
 
     print(find_sigma_cleavage_positions(mol))
 
-    # frags = get_sigma_cleaved(mol, 3, 4)
-    # plt_indices_bond(frags)
+    frags = get_sigma_cleaved(mol, 3, 4)
+    plt_indices_bond(frags)

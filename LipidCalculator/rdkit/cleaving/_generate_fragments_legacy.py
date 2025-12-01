@@ -32,7 +32,7 @@ def _convert_to_modes_dict(fragments: Iterable[Mol]) -> dict[ChargeType, list[Mo
 
 def split_bond(mol, atom_idx1, atom_idx2, is_inductive=None) -> tuple[Mol, Mol]:
     """Cleave a molecule at the bond between the specified atoms. Return the generated fragments."""
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
     atom1 = rw_mol.GetAtomWithIdx(atom_idx1)
     atom2 = rw_mol.GetAtomWithIdx(atom_idx2)
     rw_mol.RemoveBond(atom1.GetIdx(), atom2.GetIdx())
