@@ -9,8 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from tqdm import tqdm
 
-from LipidCalculator.cleaving.generate_fragments import get_fragments
-from LipidCalculator.adduct.rdkit_add_adduct import add_adduct_to_heteroatom
+from LipidCalculator.cleaving.generate_fragments import FragmentTree, Fragment
+from LipidCalculator.adduct.rdkit_add_adduct import find_adduct_positions, get_mol_with_adduct
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import ABBREVIATION_TO_GROUP
 from LipidCalculator.compound_groups.to_sql import submit_to_db_inside_session
@@ -34,18 +34,19 @@ def to_orm_mol(mol: Mol):
 
 
 def add_mol_as_comp(session, pieces: dict[str, str]):
-    def _add_fragment(f, is_loss):
+    def _add_fragment(f: Fragment):
         if f is None:
             return
-        f_mol = to_orm_mol(f)
+        f_mol = to_orm_mol(f.mol)
+        is_loss = f.charge == 0
         f_peak = FragmentPeak(
             molecule=f_mol,
             is_fragment=True,
             is_neutral_loss=is_loss,
-            mz=f_mol.M / f_mol.charge if not is_loss else None,
+            mz=f.mz if not is_loss else None,
             adduct='M+' if not is_loss else None,
         )
-        frags.append(f_peak)
+        frags_orm.append(f_peak)
 
     pieces = {k: v for k, v in pieces.items() if v is not None}
 
@@ -67,23 +68,32 @@ def add_mol_as_comp(session, pieces: dict[str, str]):
         )
         # only H+ adduct for now
         # TODO: other adducts
-        mol_with_adduct = to_orm_mol(add_adduct_to_heteroatom(compound_mol))
-        ions = [
-            IonPeak(adduct='[M+H]+',
-                    mz=mol_with_adduct.M / mol_with_adduct.charge,
-                    molecule=mol_with_adduct)
+        adduct_type = '[M+H]+'
+        adduct_positions = find_adduct_positions(compound_mol)
+        # pick a representative ... this is ment for different adducts
+        mol_with_adduct: Mol = get_mol_with_adduct(
+            compound_mol, add=adduct_type, return_mode='index', idx=adduct_positions[0]
+        )
+        frag = Fragment(mol=mol_with_adduct)
+        ions: list[IonPeak] = [
+            IonPeak(
+                adduct=adduct_type,
+                molecule=Molecule(
+                    smiles=frag.smiles,
+                    M=frag.mass,
+                    charge=frag.charge
+                )
+            )
         ]
-
         ion_to_frags = {}
         for ion in ions:
-            # TODO: take adduct into account for fragments?
-            frags_pos, frags_neut = get_fragments(
-                compound_mol, max_recursion_depth=0)
-            frags = []
-            for f, l in zip(frags_pos, frags_neut):
-                _add_fragment(f, False)
-                _add_fragment(l, True)
-            ion_to_frags[ion] = frags
+            tree = FragmentTree(mol=compound_mol, max_recursion_depth=2, adduct_type=adduct_type,
+                                cleavage_types=["ALPHA", "INDUCTIVE"])
+            frags = tree.get_all_fragments()
+            frags_orm = []
+            for frag in frags:
+                _add_fragment(frag)
+            ion_to_frags[ion] = frags_orm
 
         submit_to_db_inside_session(
             session=session,
