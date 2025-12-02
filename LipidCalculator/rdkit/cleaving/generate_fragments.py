@@ -154,7 +154,7 @@ def plot_ms2_prediction(
         if (not add_struct_plots) or (num_non_h <= 3):
             continue
         ax.plot(*p, transform=tr, marker='o', c='r')
-        inset_ax = inset_axes(ax, width=4, height=4, loc='center',
+        inset_ax = inset_axes(ax, width=2, height=2, loc='center',
                               bbox_to_anchor=p,
                               bbox_transform=tr,
                               borderpad=0)
@@ -406,7 +406,7 @@ class Fragment:
                     movable_charges = _find_movable_charges(
                         frag.mol,
                         charge_type='positive',
-                        as_h_plus=self.charge_movement_as_h_plus
+                        as_h_plus=False
                     )
                     logger.info(f'found {len(movable_charges)} possible other charge position(s) at {movable_charges}')
                     assert len(movable_charges) <= 1, \
@@ -754,28 +754,39 @@ if __name__ == "__main__":
 
     from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 
-    name = 'PI AR'
-    mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=False)
+    name = 'PE DAG C17:0 C16:1'
+    mol = ipl_automatic_bonds(
+        name.split(), plts=False, idx_plt=False, split_chain=False
+    )
+    mol = AddHs(mol)
+    plt_indices_bond(mol)
 
     # plt.show()
     # plt.pause(1)
     #
     # adduct_pos = int(input('Adduct position: '))
     #
-    # mol_with_adduct = get_mol_with_adduct(mol, add='[M+NH4]+', return_mode='index', idx=adduct_pos)
-    # mol_with_h_plus = steal_charge_from_adduct(mol_with_adduct, keep_h=True, plts=False)
-    # plt_indices_bond(mol_with_h_plus)
+    mol_with_adduct = get_mol_with_adduct(
+        mol, add='[M+NH4]+', return_mode='index', idx=14)
+    mol_with_h_plus = steal_pos_charge_from_adduct(
+        mol_with_adduct, keep_h=False, plts=False)
+    plt_indices_bond(mol_with_h_plus)
     #
     # print(ExactMolWt(mol_with_h_plus))
     # print(rdMolDescriptors.CalcMolFormula(mol_with_h_plus))
 
-    # pos = _find_cleavage_positions(mol_with_h_plus)
-    #
-    # for p in pos['SIGMA']:
-    #     # frags = get_inductively_cleaved(mol_with_h_plus, *p)
-    #     # frags = get_alpha_cleaved(mol_with_h_plus, *p)
-    #     frags = get_sigma_cleaved(mol_with_h_plus, *p)
-    #     plt_indices_bond(frags)
+    pos = _find_cleavage_positions(mol_with_h_plus, cleavage_types=['ALPHA'])
+
+    for p in pos['ALPHA']:
+        # frags = get_inductively_cleaved(mol_with_h_plus, *p)
+        frags = get_alpha_cleaved(mol_with_h_plus, *p)
+        for frag in frags:
+            f = Fragment(frag)
+            print(p, f.formula, f.mass)
+        # frags = get_sigma_cleaved(mol_with_h_plus, *p)
+        fig, ax = plt.subplots()
+        plt_indices_bond(frags, ax=ax, remove_hs=True)
+        _figure_wait_until_pressed(fig)
 
     # frag = Fragment(mol=mol_with_h_plus)
     # frag.get_child_fragments(only_inductive=False)
@@ -789,12 +800,12 @@ if __name__ == "__main__":
     tree = FragmentTree(
         mol,
         adduct_type='[M+H]+',
-        max_recursion_depth=1,
+        max_recursion_depth=2,
         allow_charge_relocation=True,
         cleavage_types=['INDUCTIVE', 'ALPHA'],
     )
     # tree.plot_ions()
-    fig = tree.plot_ms2(add_struct_plots=False, res_pixels_child=500)
+    # fig = tree.plot_ms2(add_struct_plots=False, res_pixels_child=500)
 
     # plt_indices_bond([mol])
     # cleavage_pos = find_cleavage_bonds(mol)

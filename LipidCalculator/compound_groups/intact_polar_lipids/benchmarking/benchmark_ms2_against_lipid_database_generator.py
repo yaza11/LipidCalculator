@@ -36,13 +36,13 @@ tree = FragmentTree(
     mol,
     adduct_type='[M+NH4]+',
     max_recursion_depth=1,
-    allow_charge_relocation=False,
+    allow_charge_relocation=True,
     cleavage_types=['INDUCTIVE', 'ALPHA']
 )
 # initiate fragmentation
 tree.get_all_fragments()
 
-fig = tree.plot_ms2(add_struct_plots=False)
+fig = tree.plot_ms2(add_struct_plots=True, res_pixels_child=500)
 axs = fig.get_axes()
 
 try:

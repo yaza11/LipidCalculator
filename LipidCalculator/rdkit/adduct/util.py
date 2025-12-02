@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from rdkit import Chem
 from rdkit.Chem import Mol, AddHs
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
-from rdkit.Chem.rdmolops import RemoveHs
+from rdkit.Chem.rdmolops import RemoveHs, SanitizeMol
 
 from LipidCalculator import CompoundDict
 from LipidCalculator.rdkit.cleaving.util import SUPPORTED_HETEROATOMS
@@ -224,8 +224,11 @@ def get_mol_with_adduct(
         assert idx is not None
 
     if add == 'M+':
-        return _increase_formal_charge(mol, return_mode=return_mode, idx=idx)
-    return _add_adduct_to_heteroatom(mol, add, return_mode=return_mode, idx=idx)
+        mol_new = _increase_formal_charge(mol, return_mode=return_mode, idx=idx)
+    else:
+        mol_new = _add_adduct_to_heteroatom(mol, add, return_mode=return_mode, idx=idx)
+    SanitizeMol(mol_new)
+    return mol_new
 
 
 def steal_pos_charge_from_adduct(mol_with_adduct: Mol, keep_h: bool, plts=False) -> Mol:
@@ -277,7 +280,7 @@ def steal_pos_charge_from_adduct(mol_with_adduct: Mol, keep_h: bool, plts=False)
         plt_indices_bond(rw_mol, ax=axs[3], remove_hs=False)
         axs[3].set_title('hydrogen or radical added')
 
-    frags = Chem.GetMolFrags(rw_mol, asMols=True, sanitizeFrags=False)
+    frags = Chem.GetMolFrags(rw_mol, asMols=True, sanitizeFrags=True)
 
     # here we are assuming that fragment 0 is always the molecule, TODO: is this always the case?
     mol = frags[0]

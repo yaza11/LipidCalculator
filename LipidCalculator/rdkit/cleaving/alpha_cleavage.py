@@ -16,33 +16,45 @@ def find_alpha_cleavage_positions(mol: Chem.Mol) -> list[tuple[int, int]]:
     possible_alpha_cleavage_positions: list[tuple[int, int]] = []
     for atom in mol.GetAtoms():
         atom_idx = atom.GetIdx()
+        # atom with charge must be heteroatom with radical
         if (atom.GetNumRadicalElectrons() == 0) or (atom.GetFormalCharge() <= 0) or (
                 atom.GetSymbol() not in SUPPORTED_HETEROATOMS):
             continue
+        # next atom must be C atom
         for atom_c in atom.GetNeighbors():
             if atom_c.GetSymbol() != 'C':
                 continue
+            # atom after that must be C atom as well
             for atom_acc in atom_c.GetNeighbors():
-                if (atom_acc_idx := atom_acc.GetIdx()) == atom_idx:
-                    continue
+                # exclude the first atom (shouldn't be necessary since the
+                # start atom is a heteroatom
+                # if (atom_acc_idx := atom_acc.GetIdx()) == atom_idx:
+                #     continue
                 if atom_acc.GetSymbol() == 'C':
-                    possible_alpha_cleavage_positions.append((atom_idx, atom_acc_idx))
+                    possible_alpha_cleavage_positions.append(
+                        (atom_idx, atom_acc.GetIdx())
+                    )
 
     return possible_alpha_cleavage_positions
 
 
-def get_alpha_cleaved(mol: Mol, atom_charged_radical_idx: int, atom_accepting_radical_idx: int):
+def get_alpha_cleaved(
+        mol: Mol,
+        atom_charged_radical_idx: int,
+        atom_accepting_radical_idx: int
+):
     assert check_hs_treated_as_neighbors(mol)
-    assert mol.GetAtomWithIdx(atom_charged_radical_idx).GetNumRadicalElectrons() > 0, 'Atom should have radical'
 
     rw_mol = Chem.RWMol(Mol(mol))
 
-    # determine index of alpha carbon
     atom_charged_radical = rw_mol.GetAtomWithIdx(atom_charged_radical_idx)
     atom_accepting_radical = rw_mol.GetAtomWithIdx(atom_accepting_radical_idx)
+    assert atom_charged_radical.GetNumRadicalElectrons() > 0, \
+        'Atom should have radical'
+    assert atom_charged_radical.GetSymbol() in SUPPORTED_HETEROATOMS
+    assert atom_charged_radical.GetFormalCharge() > 0
 
-    atom_charged_radical.GetNeighbors()
-
+    # determine index of alpha carbon
     # alpha Carbon is between charged radical and atom accepting the radical
     idcs_neighbours_charged: set[int] = set(nbr.GetIdx() for nbr in atom_charged_radical.GetNeighbors())
     idcs_neighbours_acceptor: set[int] = set(nbr.GetIdx() for nbr in atom_accepting_radical.GetNeighbors())
@@ -72,9 +84,9 @@ def get_alpha_cleaved(mol: Mol, atom_charged_radical_idx: int, atom_accepting_ra
 if __name__ == "__main__":
     # reproducing example from https://en.wikipedia.org/wiki/Fragmentation_(mass_spectrometry)
     mol = AddHs(Chem.MolFromSmiles("CCC([OH+])CC"))
-    plt_indices_bond([mol], remove_hs=False)
+    plt_indices_bond([mol], remove_hs=True)
 
     print(find_alpha_cleavage_positions(mol))
 
     frags = get_alpha_cleaved(mol, 3, 1)
-    plt_indices_bond(frags, remove_hs=False)
+    plt_indices_bond(frags, remove_hs=True)
