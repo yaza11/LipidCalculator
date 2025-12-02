@@ -1,16 +1,10 @@
 """This module benchmarks MS2 spectra generated with LipidDatabase_Generator against ipl_automatic_bonds"""
-import numpy as np
 from matplotlib import pyplot as plt
-from msIO import MSPReader, PeakList
-import os
+from msIO import PeakList
 
-from rdkit import Chem
-from rdkit.Chem.Descriptors import ExactMolWt
-
-from LipidCalculator.compound_groups.intact_polar_lipids.benchmarking.benchmark_util import pieces_from_ldg_name, \
+from LipidCalculator.compound_groups.intact_polar_lipids.benchmarking.benchmark_util import \
     get_fragment_from_lipiddatabase_generator
-from LipidCalculator.cleaving.generate_fragments import FragmentTree
-from LipidCalculator.compound_groups.intact_polar_lipids.benchmarking.paths import path_folder_fragments
+from LipidCalculator.rdkit.cleaving.generate_fragments import FragmentTree
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 
 
@@ -35,10 +29,16 @@ def plot_predicted_against_measured(name, adduct_type, ms_spec: PeakList, **kwar
 
 # %%
 # plt.close('all')
-name = 'AR'
+name = 'PE DAG C17:0 C16:1'
 
 mol = ipl_automatic_bonds(name.split(), plts=False, idx_plt=False, split_chain=True)
-tree = FragmentTree(mol, adduct_type='[M+NH4]+', max_recursion_depth=1)
+tree = FragmentTree(
+    mol,
+    adduct_type='[M+NH4]+',
+    max_recursion_depth=1,
+    allow_charge_relocation=False,
+    cleavage_types=['INDUCTIVE', 'ALPHA']
+)
 # initiate fragmentation
 tree.get_all_fragments()
 

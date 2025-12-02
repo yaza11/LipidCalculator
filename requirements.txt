@@ -1,0 +1,11 @@
+rdkit~=2025.9.1
+pillow~=12.0.0
+matplotlib~=3.10.7
+numpy~=2.3.4
+scipy~=1.16.3
+pandas~=2.3.3
+IsoSpecPy~=2.3.1
+msIO~=0.0.24
+SQLAlchemy~=2.0.44
+tqdm~=4.67.1
+requests~=2.32.5

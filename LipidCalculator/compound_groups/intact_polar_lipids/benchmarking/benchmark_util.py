@@ -32,7 +32,9 @@ def get_fragment_from_lipiddatabase_generator(name: str) -> PeakList:
     # first, find the right file
     file_name = f'{head}-{core}_pos.msp'
 
-    if len(chains) == 1:
+    if len(chains) == 0:
+        file_name = f'{head}-{core}_pos.msp'
+    elif len(chains) == 1:
         name_msp = f'{head}-{core} {chains[0][1:]}'
     else:
         assert len(chains) == 2

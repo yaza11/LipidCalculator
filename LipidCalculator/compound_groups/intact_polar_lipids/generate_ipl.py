@@ -423,7 +423,7 @@ def correct_chain_length_for_core(
 
 
 def replace_OOP_with_OP(mol):
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(mol)  #
 
     # Find O–O–P
     match = rw_mol.GetSubstructMatch(Chem.MolFromSmarts("[O]-[O]-[P]"))

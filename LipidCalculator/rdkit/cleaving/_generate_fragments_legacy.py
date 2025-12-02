@@ -6,8 +6,8 @@ from rdkit import Chem
 from rdkit.Chem import Mol, EXPLICIT
 from rdkit.Chem.Descriptors import ExactMolWt
 
-from LipidCalculator.cleaving.generate_fragments import ChargeType, PERIODIC_TABLE, Fragment
-from LipidCalculator.cleaving.inductive_cleavage import get_inductively_cleaved
+from LipidCalculator.rdkit.cleaving.generate_fragments import ChargeType, PERIODIC_TABLE, Fragment
+from LipidCalculator.rdkit.cleaving.inductive_cleavage import get_inductively_cleaved
 from LipidCalculator.compound_groups.common_fragments import MASS_PROTON
 from LipidCalculator.rdkit.plotting import mplt_mol
 
@@ -32,7 +32,7 @@ def _convert_to_modes_dict(fragments: Iterable[Mol]) -> dict[ChargeType, list[Mo
 
 def split_bond(mol, atom_idx1, atom_idx2, is_inductive=None) -> tuple[Mol, Mol]:
     """Cleave a molecule at the bond between the specified atoms. Return the generated fragments."""
-    rw_mol = Chem.RWMol(mol)
+    rw_mol = Chem.RWMol(Mol(mol))
     atom1 = rw_mol.GetAtomWithIdx(atom_idx1)
     atom2 = rw_mol.GetAtomWithIdx(atom_idx2)
     rw_mol.RemoveBond(atom1.GetIdx(), atom2.GetIdx())

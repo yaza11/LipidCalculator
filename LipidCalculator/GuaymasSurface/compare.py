@@ -1,7 +1,6 @@
-from LipidCalculator.GuaymasSurface.known_compounds import SELECTED_COMPOUND_NAMES
-from LipidCalculator.GuaymasSurface.paths import db_file_surface, \
-    folder
-from LipidCalculator.cleaving.generate_fragments import predict_ms2, plot_ms2_prediction
+from LipidCalculator.GuaymasSurface.known_compounds import SELECTED_COMPOUND_NAMES_REVERSED
+from LipidCalculator.GuaymasSurface.paths import db_file_surface
+from LipidCalculator.rdkit.cleaving.generate_fragments import plot_ms2_prediction, predict_ms2
 from LipidCalculator.compound_groups.intact_polar_lipids.benchmarking.benchmark_util import \
     get_fragment_from_lipiddatabase_generator
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
@@ -10,7 +9,6 @@ from msIO.features.metaboscape import FeatureMetaboScape
 from msIO.features.mgf import FeatureMgf, MsSpec
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, joinedload
-from tqdm import tqdm
 
 # annotated name to in silico name
 # annotations can be the same for multiple features
@@ -49,7 +47,10 @@ feature_id_to_names = {k: v for k, v in feature_id_to_names.items() if k in feat
 
 
 # %%
-def create_plot_for_name_metabo(name_metabo, name_syn):
+def create_plot_for(name_syn):
+    # fetch metabo name
+    name_metabo = SELECTED_COMPOUND_NAMES_REVERSED[name_syn]
+
     f_ids = [f_id
              for f_id, _name in feature_id_to_names.items()
              if _name == name_metabo]
@@ -58,7 +59,13 @@ def create_plot_for_name_metabo(name_metabo, name_syn):
     mol = ipl_automatic_bonds(name_syn.split(), split_chain=True)
     # TODO: use correct adduct
     fig, ax = plt.subplots(figsize=(12, 8))
-    ms = predict_ms2(mol=mol, adduct_type='[M+H]+', max_recursion_depth=1)
+    ms = predict_ms2(
+        mol=mol,
+        adduct_type='[M+H]+',
+        max_recursion_depth=1,
+        allow_charge_relocation=True,
+        cleavage_types=['INDUCTIVE', 'ALPHA']
+    )
     plot_ms2_prediction(ms, add_struct_plots=False, ax=ax)
     # add the prediction from Julius' DB
     try:
@@ -82,9 +89,9 @@ def create_plot_for_name_metabo(name_metabo, name_syn):
             -iis / iis.max(),
             markerfmt='none',
             linefmt=f'C{i}',
-            label=f'Delta m/z = {ms_spec_measured.mz - mz_h_plus:.4f})'
+            label=r'$\Delta m/z =$' + f'{ms_spec_measured.mz - mz_h_plus:.4f}'
         )
-    ax.set_title(f'{name_syn} (M = {M:.4f}')
+    ax.set_title(f'{name_syn} (M = {M:.4f})')
     ax.legend()
     return fig, ax
 
@@ -92,10 +99,9 @@ def create_plot_for_name_metabo(name_metabo, name_syn):
 # %% plot measured and synthetic
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 from rdkit.Chem.Descriptors import ExactMolWt
 
-create_plot_for_name_metabo('1G-DAG 33:1; [M+H]+; 1G-DAG(17:1/16:0)', '1G DAG C17:1 C16:0')
+create_plot_for(name_syn='1G DAG C17:1 C16:0')
 plt.show()
 
 # for name_metabo in tqdm(feature_id_to_names.values(), desc='creating plots'):
