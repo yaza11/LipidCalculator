@@ -1,147 +1,140 @@
 """Given a formula, predict the isotope pattern"""
-from typing import Iterable, OrderedDict, Self
+from typing import Iterable, OrderedDict, Self, Literal
 
 import numpy as np
 import pandas as pd
 from IsoSpecPy import ParseFormula, IsoDistribution
 from matplotlib import pyplot as plt
-from scipy.optimize import least_squares, OptimizeResult, minimize, Bounds
+from msIO import PeakList
+from scipy.optimize import least_squares, OptimizeResult, minimize
 
+from LipidCalculator import CompoundDict
+from LipidCalculator.isotopes.standards_and_deltas import f_VPDB_C13, f_VSMOV_H2, ATOM2ISOS, DEFAULT_MASS_TOLERANCE, \
+    C13C12to_delta13C, H2H1to_delta13C, O17O16to_delta17O, S34S32to_delta34S, delta13C_to_f, delta2H_to_f, \
+    delta17O_to_f, delta34S_to_f
+from LipidCalculator.rdkit.adduct.parser import get_adduct_mass_and_charge
 from isotopes import isotope_properties as isotope_properties
+
 import IsoSpecPy as isospec
+import logging
 
-# PDB standard
-# TODO: which one to use? why are there multiple?
-# f_VPDB_C13 = 0.01123720
-f_VPDB_C13 = 0.0111802
-f_VSMOV_O17 = 379.9e-6  # https://en.wikipedia.org/wiki/Vienna_Standard_Mean_Ocean_Water
-f_VSMOV_H2 = 155.76e-6
-ATOM2ISOS: dict[str, tuple[str, str]] = {
-    'H': ('H[1]', 'H[2]'),
-    'C': ('C[12]', 'C[13]'),
-    'O': ('O[16]', 'O[18]')
-}
-DEFAULT_MASS_TOLERANCE: float = 5e-3
+logger = logging.getLogger(__name__)
 
-
-def C13C12to_delta13C(pC12, pC13):
-    """Calculate delta value from C13 and C12 portions"""
-    return (pC13 / pC12 / f_VPDB_C13 - 1) * 1000  # =delta13C in permil
-
-
-def H2H1to_delta13C(pH1, pH2):
-    """Calculate delta value """
-    return (pH2 / pH1 / f_VSMOV_H2 - 1) * 1000
-
-
-def O17O16to_delta13C(pO16, pO17):
-    """Calculate delta value """
-    return (pO17 / pO16 / f_VSMOV_O17 - 1) * 1000
-
-
-def delta13C_to_f(delta13C):
-    """Calculate fraction of C13 and C12 from delta value"""
-    f = (delta13C / 1000 + 1) * f_VPDB_C13
-    # since C13 + C12 = 1
-    C13 = f / (1 + f)
-    C12 = 1 - C13
-    return C13, C12
-
-
-def delta2H_to_f(delta2H):
-    """Calculate fraction of C13 and C12 from delta value"""
-    f = (delta2H / 1000 + 1) * f_VSMOV_H2
-    # since 2H + H = 1
-    H2 = f / (1 + f)
-    H1 = 1 - H2
-    return H2, H1
-
-
-def delta17O_to_f(delta17O):
-    """Calculate fraction of C13 and C12 from delta value"""
-    f = (delta17O / 1000 + 1) * f_VSMOV_O17
-    # since 2H + H = 1
-    O17 = f / (1 + f)
-    O16 = 1 - O17
-    return O17, O16
+iso_abundance_input_type = Literal['probabilities', 'ratio', 'delta', 'natural', 'p', 'r', 'd', 'n']
 
 
 class IsoTable:
     """Provides the probability and mass matrices/vectors/list of lists"""
     probabilities: list[float] | None = None
+    atoms_in_table: list[str] = None
+    isotope_names: list[str] = None
+    masses: list[float] = None
+    _dataframe: pd.DataFrame = None
 
-    def __init__(self, atoms_in_table: list[str]):
-        self.atoms_in_table = atoms_in_table
+    def __init__(
+            self,
+            *quantities: tuple[str, iso_abundance_input_type, float | tuple[float, float] | None]
+    ):
+        """
+        Relative abundances of isotopes must be provided as a tuple of element name, input type and value
 
-        self.isotopes: list[str] = []
+        Notice that no check for uniquenes of values is performed, therefore when providing e.g. dict(ratio_S=.98, d34S=0),
+        the later value will override previous ones
+        """
+        iso_to_prob: dict[str, float] = {}
+        atoms_in_table = set()
+        for element, input_type, value in quantities:
+            assert element in ATOM2ISOS, f'{element=} not supported'
+            atoms_in_table.add(element)
+            iso_names = ATOM2ISOS[element]
+            # parse key to determine input type (prob, ratio or delta)
+            if input_type in ('probabilities', 'p'):  # probability provided directly
+                assert len(value) == 2
+            elif input_type in ('ratio', 'r'):
+                assert value > 0
+                value = self._probs_from_ratio(value)
+            elif input_type in ('delta', 'd'):
+                value = self._probs_from_delta(element, value)[::-1]
+            elif input_type in ('natural', 'n'):
+                isos = ATOM2ISOS[element]
+                value = [isotope_properties.at[iso, 'Isotopic Composition'] for iso in isos]
+            else:
+                raise TypeError(f'Invalid input type {input_type}')
+
+            for iso_name, v in zip(iso_names, value):
+                assert 0 <= v <= 1
+                iso_to_prob[iso_name] = v
+
+        self.atoms_in_table = list(atoms_in_table)
+
+        self.isotope_names: list[str] = []
         for atom in self.atoms_in_table:
-            self.isotopes.extend(ATOM2ISOS[atom])
+            self.isotope_names.extend(ATOM2ISOS[atom])
 
         self.masses: list[float] = [
             isotope_properties.at[iso, 'Relative Atomic Mass']
-            for iso in self.isotopes
+            for iso in self.isotope_names
         ]
+        self.probabilities: list[float] = [iso_to_prob[iso_name] for iso_name in self.isotope_names]
+        self._renormalize()
 
-    def set_natural_probabilities(self):
-        self.probabilities: list[float] = [
-            isotope_properties.at[iso, 'Isotopic Composition']
-            for iso in self.isotopes
-        ]
+    @staticmethod
+    def _probs_from_ratio(r):
+        # probability of denum and num in ratio (e.g., S[32] and S[34])
+        return 1 / (1 + r), r / (1 + r)
 
-    def set_custom_probabilities(self, mapper: dict[str, float]) -> None:
-        """
-        :param mapper: keys: isotope names, values: probabilities. Not provided
-            values will be filled with the natural abundances
-        :return: None
-        """
-        self.probabilities: list[float] = [
-            mapper.get(iso, isotope_properties.at[iso, 'Isotopic Composition'])
-            for iso in self.isotopes
-        ]
+    @staticmethod
+    def _probs_from_delta(element_name, delta_value):
+        el_to_func = {
+            'C': delta13C_to_f,
+            'H': delta2H_to_f,
+            'O': delta17O_to_f,
+            'S': delta34S_to_f
+        }
+        assert element_name in el_to_func, f'delta values for element {element_name} not supported'
+        return el_to_func[element_name](delta_value)
 
-    def set_probabilities_from_ratios(self, ratios: dict[str, float]) -> None:
-        """
-        :param ratios: dictionary where the keys are the element abbreviations
-            and the values the ratios (rare over common). Missing elements will
-            be filled with the natural abundances.
-        :return: None
-        """
-        self.probabilities = []
-        for a in self.atoms_in_table:
-            if a in ratios:
-                r = ratios[a]
-                self.probabilities.extend([
-                    1 / (1 + r),  # e.g. 1H
-                    r / (1 + r)  # e.g. 2H
-                ])
-            else:
-                isos = ATOM2ISOS[a]
-                self.probabilities.extend(
-                    [isotope_properties.at[iso, 'Isotopic Composition']
-                     for iso in isos]
-                )
+    def _as_deltas(self):
+        """Convert probabilities to delta values"""
+        el_to_f = {
+            'C': C13C12to_delta13C,
+            'H': H2H1to_delta13C,
+            'O': O17O16to_delta17O,
+            'S': S34S32to_delta34S
+        }
 
-    def set_probabilites_from_delta(
-            self,
-            d13C: float | None = None,
-            d2H: float | None = None,
-            d17O: float | None = None
-    ) -> None:
-        """Only supports d13C right now. Will use natural abundances for other elements"""
-        mapper: dict[str, float] = {}
-        if d13C is not None:
-            C13, C12 = delta13C_to_f(d13C)
-            mapper |= {'C[13]': C13, 'C[12]': C12}
-        if d2H is not None:
-            H2, H1 = delta2H_to_f(d2H)
-            mapper |= {'H[2]': H2, 'H[1]': H1}
-        if d17O is not None:
-            O17, O16 = delta17O_to_f(d17O)
-            mapper |= {'O[17]': O17, 'O[16]': O16}
-        self.set_custom_probabilities(mapper)
+        out = {}
+        for el, row in zip(self.atoms_in_table, self.ps_isospec):
+            out[el] = el_to_f[el](*row)
+        return out
+
+    def _renormalize(self):
+        """Make sure probabilites for each atom add up to 1"""
+        for idx, a in enumerate(self.atoms_in_table):
+            n = self.probabilities[idx * 2] + self.probabilities[idx * 2 + 1]
+            self.probabilities[idx * 2] /= n
+            self.probabilities[idx * 2 + 1] /= n
+
+    @property
+    def dataframe(self):
+        if self._dataframe is None:
+            self._dataframe = pd.DataFrame(
+                data=self.ps_isospec, index=self.atoms_in_table, columns=['p0', 'p1']
+            )
+            self._dataframe.loc[:, 'ratio'] = self._dataframe.p1 / self._dataframe.p0
+            deltas = self._as_deltas()
+            self._dataframe.loc[:, 'delta'] = np.nan
+            for el, delta in deltas.items():
+                self._dataframe.loc[el, 'delta'] = delta
+            self._dataframe.loc[:, 'name0'] = self.isotope_names[0::2]
+            self._dataframe.loc[:, 'name1'] = self.isotope_names[1::2]
+            self._dataframe.loc[:, 'm0'] = self.masses[0::2]
+            self._dataframe.loc[:, 'm1'] = self.masses[1::2]
+        return self._dataframe
 
     @property
     def ratios(self) -> list[float]:
+        """Calculate probability ratios for elements"""
         n_iso = len(self.probabilities) // 2
         fs = []
         for i in range(n_iso):
@@ -150,6 +143,7 @@ class IsoTable:
 
     @property
     def ps_isospec(self) -> list[list[float]]:
+        """Format probabilities to be provided to IsoSpecPy"""
         # iso expects list of lists
         ps: list[list[float]] = []
         for idx, a in enumerate(self.atoms_in_table):
@@ -159,39 +153,22 @@ class IsoTable:
 
     @property
     def ms_isospec(self) -> list[list[float]]:
+        """Format masses to be provided to IsoSpecPy"""
         ms: list[list[float]] = []
         for idx, a in enumerate(self.atoms_in_table):
             ms_el = [self.masses[idx * 2], self.masses[idx * 2 + 1]]
             ms.append(ms_el)
         return ms
 
-    def as_deltas(self):
-        el_to_f = {
-            'C': C13C12to_delta13C,
-            'H': H2H1to_delta13C,
-            'O': O17O16to_delta13C
-        }
-
-        out = {}
-        for el, row in zip(self.atoms_in_table, self.ps_isospec):
-            out[el] = el_to_f[el](*row)
-        return out
-
-    def renormalize(self):
-        """Make sure probabilites for each atom add up to 1"""
-        for idx, a in enumerate(self.atoms_in_table):
-            n = self.probabilities[idx * 2] + self.probabilities[idx * 2 + 1]
-            self.probabilities[idx * 2] /= n
-            self.probabilities[idx * 2 + 1] /= n
-
     def __repr__(self) -> str:
-        return pd.DataFrame(data=self.ps_isospec, index=self.atoms_in_table).to_string()
+        return self.dataframe.to_string()
 
 
 class IsotopePattern:
     def __init__(self, masses, intensities):
         self.masses: list[float] = list(masses)
-        self.intensities: list[float] = list(intensities)
+        i_max = max(intensities)
+        self.intensities: list[float] = [i / i_max for i in intensities]
         assert len(self.masses) == len(self.intensities), \
             'number of entries for masses and intensities do not match'
         self.n_peaks: int = len(self.masses)
@@ -216,8 +193,12 @@ class IsotopePattern:
             if dists[idx_dist] < mass_tol:
                 binned_intensities_predicted[idx_dist] += i
             else:
-                print(
-                    f'unmatched peak: {m=:.4f}, {i=:.2f}, distance: {dists[idx_dist]:.4f}, bins: {np.round(iso_masses_measured, 4)}')
+                logger_func = logger.warning if i > .05 else logger.debug
+                logger_func(
+                    f'unmatched peak: {m=:.4f}, {i=:.2f}, '
+                    f'distance: {dists[idx_dist]:.4f}, '
+                    f'bins: {np.round(iso_masses_measured, 4)}'
+                )
 
         self.intensities = binned_intensities_predicted
         self.masses = list(iso_masses_measured)
@@ -257,27 +238,34 @@ class IsoPatternFit:
     Fit the isotope pattern of a molecule with a given formula for possibly
     non-natural isotope abundances.
     """
+    formula: str = None
+    atoms_fit: list[str] = None  # for which patterns to tweak the isotope abundances in order to improve the fit
+    atom_counts: list[int] = None  # corresponding number of atoms according to the formula
+    atoms_fixed: OrderedDict = None  # dict with elements and counts that are not manipulated
+    iso_table: IsoTable = None
+    iso_pattern: IsotopePattern = None  # measured isotope pattern that is to be achieved by adjusting the isotope abundances
 
     def __init__(
             self,
             formula: str,
             atoms_fit: list[str],
-            measured_isotope_pattern: IsotopePattern | None = None,
-            iso_table: IsoTable | None = None
+            measured_isotope_pattern: IsotopePattern = None,
+            iso_table: IsoTable = None
     ) -> None:
         self.formula = formula
 
-        options_fit_elements: list[str] = 'H C O'.split()
-        assert all([f in options_fit_elements for f in atoms_fit]), \
-            f'can only fit isotopes for elements {options_fit_elements}'
+        _options_fit_elements: list[str] = 'H C O S'.split()
+        assert all([f in _options_fit_elements for f in atoms_fit]), \
+            f'can only fit isotopes for elements {_options_fit_elements}'
         self.atoms_fit: list[str] = atoms_fit
 
         # decompose formula into part that is used to fit spectrum and remainder
-        self.atom_counts, self.remainder = self._get_atom_counts_fitted_elements()
+        self.atom_counts, self.atoms_fixed = self._get_atom_counts_fitted_elements()
 
         if iso_table is None:
-            iso_table = IsoTable(atoms_in_table=atoms_fit)
-            iso_table.set_natural_probabilities()
+            iso_table = IsoTable(
+                *[(element, 'natural', None) for element in self.atoms_fit]
+            )
         else:
             assert hasattr(iso_table, 'probabilities'), \
                 'if isotable is provided, the probabilites must be set'
@@ -289,8 +277,8 @@ class IsoPatternFit:
         else:
             self.iso_pattern: IsotopePattern = measured_isotope_pattern
 
-        self._target_masses: list[float] = self.iso_pattern.masses.copy()
-        self._target_intensities: list[float] = self.iso_pattern.intensities.copy()
+        self._target_masses: np.ndarray[float] = np.array(self.iso_pattern.masses)
+        self._target_intensities: np.ndarray[float] = np.array(self.iso_pattern.intensities)
 
     def _get_atom_counts_fitted_elements(self) -> tuple[list[int], OrderedDict]:
         """Return the atom counts of elements to be fitted and remaining formula"""
@@ -301,13 +289,15 @@ class IsoPatternFit:
         return atom_counts, parsed
 
     def update_predicted_pattern(self) -> None:
-        # TODO: isotope pattern is slightly off ... why?
-        predicted_pattern: IsoDistribution = isospec.IsoThreshold(
-            formula=self.remainder,
-            threshold=.05,
+        # predicted_pattern: IsoDistribution = isospec.IsoThreshold(
+        iso_probabilities = [self.iso_table.dataframe.loc[el, ['p0', 'p1']].to_list() for el in self.atoms_fit]
+        iso_masses = [self.iso_table.dataframe.loc[el, ['m0', 'm1']].to_list() for el in self.atoms_fit]
+        predicted_pattern: IsoDistribution = isospec.IsoTotalProb(
+            formula=CompoundDict(self.atoms_fixed).formula,
+            prob_to_cover=.999,
             atomCounts=self.atom_counts,
-            isotopeProbabilities=self.iso_table.ps_isospec,
-            isotopeMasses=self.iso_table.ms_isospec
+            isotopeProbabilities=iso_probabilities,
+            isotopeMasses=iso_masses
         )
         self.iso_pattern = IsotopePattern(predicted_pattern.masses, predicted_pattern.probs)
 
@@ -319,33 +309,37 @@ class IsoPatternFit:
         """iteratively tweak probabilities to match spectrum using IsoSpecPy"""
 
         def _error(pred_intensities: np.ndarray[float]) -> np.ndarray[float] | float:
-            diff_vec = (pred_intensities - self._target_intensities) ** 2
+            # scale up probabilities for better numerical stability
+            diff_vec = (pred_intensities * 1000 - self._target_intensities * 1000) ** 2
             return diff_vec.sum() if scalar_min else diff_vec
 
-        def pred(fs: np.ndarray[float]) -> np.ndarray[float]:
+        def pred(deltas: np.ndarray[float]) -> np.ndarray[float]:
             # convert fs to ps
-            ratios_mapper = dict(zip(self.atoms_fit, fs))
-            self.iso_table.set_probabilities_from_ratios(ratios_mapper)
+            self.iso_table = IsoTable(
+                *[(element, 'delta', delta) for element, delta in zip(self.atoms_fit, deltas)]
+            )
             self.update_predicted_pattern()
             # bin into provided masses
             self.iso_pattern.bin_into_targets(self._target_masses, mass_tol=mass_tol)
             pred_intensities_binned = np.array(self.iso_pattern.intensities)
             return _error(pred_intensities_binned)
 
-        fs0 = np.array(self.iso_table.ratios)
+        deltas0 = np.array(self.iso_table.dataframe.delta)
+        # print('initial deltas:', self.iso_table.dataframe.delta.to_dict())
 
         eps = 1e-21  # p of 0 is not allowed
         if scalar_min:
-            bounds = [(eps, 10) for _ in fs0]
-            return minimize(pred, x0=fs0, bounds=bounds)
+            bounds = [(-500, 500) for _ in deltas0]
+            return minimize(pred, x0=deltas0, bounds=bounds)
         else:
-            return least_squares(pred, x0=fs0, bounds=(eps, 10))
+            return least_squares(pred, x0=deltas0, bounds=(-500, 500), ftol=3e-16, gtol=3e-16, xtol=3e-16)
 
     def as_deltas(self) -> dict:
         el_to_f = {
             'C': C13C12to_delta13C,
             'H': H2H1to_delta13C,
-            'O': O17O16to_delta13C
+            'O': O17O16to_delta17O,
+            'S': S34S32to_delta34S
         }
 
         out = {}
@@ -354,6 +348,36 @@ class IsoPatternFit:
             ps = self.iso_table.ps_isospec[i]
             out[el] = el_to_f[el](*ps)
         return out
+
+
+def predict_deltas_for_ms1(
+        ms1_pattern: PeakList,
+        formula: str,
+        adduct_type,
+        atoms_to_fit: list[str],
+        plts=False
+) -> dict[str, float]:
+    # we need to account for the fact that the MS1 spectrum contains IONS
+    #  generally, we assume that peaks in the MS1 spectrum are the [M+adduct]+ masses, so it is easiest to convert the
+    #  m/z values to M using the adduct type
+    ...
+    mzs = ms1_pattern.mzs
+    # convert to M using adduct_type
+    adduct_mass, adduct_charge = get_adduct_mass_and_charge(adduct_type, format_template='metaboscape')
+    Ms = [mz * adduct_charge - adduct_mass for mz in mzs]
+    iso_pattern = IsotopePattern(
+        masses=Ms,
+        intensities=ms1_pattern.intensities
+    )
+    model = IsoPatternFit(formula=formula, atoms_fit=atoms_to_fit, measured_isotope_pattern=iso_pattern)
+    model.fit_spectrum(scalar_min=False)
+    if plts:
+        ax = model.iso_pattern.plot(linefmt='blue')
+        iso_pattern.plot(ax=ax, shift=1, linefmt='orange')
+        # plt.legend(['measured', 'fitted'])
+        plt.show()
+
+    return model.iso_table.dataframe.delta.to_dict()
 
 
 def direct_predict_d13C(formula, iso_pattern: IsotopePattern, d2H: float = -200) -> float:
@@ -462,7 +486,7 @@ def test_archaeol():
 
     # predict the pattern
     iso_table = IsoTable(atoms_in_table='C H O'.split())
-    iso_table.set_natural_probabilities()
+    iso_table._set_natural_probabilities()
     iso_fit = IsoPatternFit(formula=formula, iso_table=iso_table, atoms_fit='C H O'.split())
     iso_pattern = iso_fit.iso_pattern
 
@@ -477,54 +501,56 @@ def test_archaeol():
     # print(I1_th2)
 
 
-if __name__ == '__main__':
-    f_archaeol = 'C43H88O3'
+def test_multi_delta_fit():
+    formula = 'C30H58O5S'
 
     # generate artificial spectrum
     actual_deltaC13 = -100
     actual_deltaH2 = -200
+    actual_deltaS34 = 50
 
-    fit_elements = ['H', 'C']
+    fit_elements = ['C', 'S', 'H']
 
-    iso_table = IsoTable(atoms_in_table=fit_elements)
-    iso_table.set_probabilites_from_delta(d13C=actual_deltaC13, d2H=actual_deltaH2)
-
-    print(iso_table.as_deltas())
+    iso_table = IsoTable(
+        ('H', 'delta', actual_deltaH2),
+        ('C', 'delta', actual_deltaC13),
+        ('S', 'delta', actual_deltaS34)
+    )
 
     # natural abundance
-    iso_fit = IsoPatternFit(
-        formula=f_archaeol, atoms_fit=fit_elements)
+    unbiased_pattern = IsoPatternFit(
+        formula=formula, atoms_fit=fit_elements)
     # actual (synthetic) pattern
-    iso_fit2 = IsoPatternFit(
-        formula=f_archaeol, atoms_fit=fit_elements, iso_table=iso_table)
-    # fit to actual pattern
-    # iso_fit3 = IsoPatternFit(
-    #     formula=f_archaeol,
-    #     atoms_fit=fit_elements,
-    #     measured_isotope_pattern=iso_fit2.iso_pattern)
-    # iso_fit3.fit_spectrum()
+    measured_pattern = IsoPatternFit(
+        formula=formula, atoms_fit=fit_elements, iso_table=iso_table)
 
-    iso_fit4 = IsoPatternFit(
-        formula=f_archaeol,
+    fitted_pattern = IsoPatternFit(
+        formula=formula,
         atoms_fit=fit_elements,
-        measured_isotope_pattern=iso_fit2.iso_pattern)
-    iso_fit4.fit_spectrum(scalar_min=True)
+        measured_isotope_pattern=measured_pattern.iso_pattern)
+    deltas_fit = fitted_pattern.fit_spectrum(scalar_min=False)
 
-    ax = iso_fit.iso_pattern.plot()
-    iso_fit2.iso_pattern.plot(ax=ax, linefmt='orange', shift=1)
+    print('unbiased:', unbiased_pattern.iso_table.dataframe.delta.to_dict())
+    print('measured:', measured_pattern.iso_table.dataframe.delta.to_dict())
+    print('fitted:', fitted_pattern.iso_table.dataframe.delta.to_dict())
+
+    ax = unbiased_pattern.iso_pattern.plot()
+    measured_pattern.iso_pattern.plot(ax=ax, linefmt='orange', shift=1)
     # iso_fit3.iso_pattern.plot(ax=ax, linefmt='green', shift=2)
-    iso_fit4.iso_pattern.plot(ax=ax, linefmt='red', shift=2)
-    ax.legend(['natural', 'fractionated', 'predicted', 'predicted scalar'])
+    fitted_pattern.iso_pattern.plot(ax=ax, linefmt='red', shift=2)
+    ax.legend(['unbiased', 'measured', 'predicted', 'predicted scalar'])
     plt.show()
 
-    fitted_deltas = iso_fit4.as_deltas()
 
-    print('fitted:', fitted_deltas)
+if __name__ == '__main__':
+    pass
 
-    print(direct_predict_d13C(f_archaeol, iso_fit.iso_pattern, d2H=-261.6))
-    print(direct_predict_d13C_exact(f_archaeol, iso_fit.iso_pattern, d2H=-261.6))
+    ms1_measured = PeakList(
+        mzs=[690.57093, 691.57305, 692.57612],
+        intensities=[137821, 64095, 28280]
+    )
 
-    print(direct_predict_d13C(f_archaeol, iso_fit2.iso_pattern))
-    print(direct_predict_d13C_exact(f_archaeol, iso_fit2.iso_pattern))
+    res = predict_deltas_for_ms1(ms1_measured, formula='C39H79NO6S', adduct_type='[M+H]+', atoms_to_fit='CS',
+                                 plts=True)
 
-    # test_archaeol()
+    print(res)
