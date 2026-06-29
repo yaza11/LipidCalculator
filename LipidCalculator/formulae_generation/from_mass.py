@@ -6,8 +6,8 @@ from typing import Self
 import numpy as np
 
 from LipidCalculator.compound_creation.formula_parser import CompoundDict
-from LipidCalculator.isotopes.main import m_e
 
+ELECTRON = 0.000549  # difference in m/z caused by electron (if z=1)
 DEFAULT_ELEMENTS: list[str] = ['C', 'H', 'O', 'N', 'S', 'P', 'Na', 'K']
 
 
@@ -143,7 +143,7 @@ def get_unconstrained_candidates_fast(
         elements: np.ndarray[float],
         current_formula: np.ndarray[float],
         elements_whitelist: np.ndarray[bool]
-) -> list[CompoundDict]:
+) -> list[np.ndarray[int]]:
     # do a tree search: recursively add elements
     results = []
 
@@ -226,13 +226,16 @@ def get_candidates(
         elements: list[str] = DEFAULT_ELEMENTS
 
     # correct for missing / additional electrons
-    mz += -ionization * m_e
+    mz += -ionization * ELECTRON
 
     # first, generate a list of all possible combinations
     # then, apply constrains
-    candidates: list[CompoundDict] = get_unconstrained_candidates(
-        mz, tolerance, elements
-    )
+    params_fast = preprocess_params(mz=mz, tolerance=tolerance, elements=elements)
+    res = get_unconstrained_candidates_fast(*params_fast)
+    candidates = [CompoundDict(dict(zip(elements, r))) for r in res]
+    # candidates: list[CompoundDict] = get_unconstrained_candidates(
+    #     mz, tolerance, elements
+    # )
 
     if constraints is None:
         return candidates
@@ -273,6 +276,8 @@ class PredictFormulas:
 
 if __name__ == '__main__':
     import time
+    from tqdm import tqdm
+    import matplotlib.pyplot as plt
 
     # res = get_unconstrained_candidates(30.010565, 1e-3, ['C', 'H', 'O'], )
     # res = get_unconstrained_candidates(36, 1e-3, ['C', 'H', 'O'], )
@@ -281,16 +286,26 @@ if __name__ == '__main__':
     # C83H168N0O5
     # res = get_candidates(1245.289175, tolerance=3e-3, ionization=0, elements='C H N O'.split())
     # mz = 180.063390
-    mz = 500.00
-    tolerance = 1e-3
-    # res_slow = get_unconstrained_candidates(mz, tolerance=tolerance, elements='C H N O'.split())
-    elements = 'C N O P S H'.split()
-    args = preprocess_params(mz, tolerance=tolerance, elements=elements)
-    t0 = time.time()
-    res = get_unconstrained_candidates_fast(*args)
-    t1 = time.time()
-    res_fast = [CompoundDict(dict(zip(elements, r))) for r in res]
-    ms = [r.mass for r in res_fast]
 
-    print(f'finding {len(res)} took {(t1 - t0) * 1e3:.0f} ms')
-    pass
+    mz = 551.749
+    tolerance = 6e-3  # mDa
+    mzs = [92.04369999999994]
+    res_slow = get_unconstrained_candidates(mzs[0], tolerance=tolerance, elements='C H N O P S'.split())
+    for cd in res_slow:
+        print(cd.formula, cd.mass)
+    elements = 'C H N O P S'.split()
+
+    # plt.figure()
+    # nres = []
+    # for mz in tqdm(mzs):
+    #     args = preprocess_params(mz, tolerance=tolerance, elements=elements)
+    #     # t0 = time.time()
+    #     res = get_unconstrained_candidates_fast(*args)
+    #     # t1 = time.time()
+    #     # res_fast = [CompoundDict(dict(zip(elements, r))) for r in res]
+    #     # ms = [r.mass for r in res_fast]
+    #     nres.append(len(res))
+    #     # print(f'finding {len(res)} took {(t1 - t0) * 1e3:.0f} ms')
+    #     plt.scatter(mz, nres[-1])
+    # plt.show()
+    # pass

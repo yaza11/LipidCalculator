@@ -1,9 +1,10 @@
 """Given a formula, predict the isotope pattern"""
+from itertools import product
 from typing import Iterable, OrderedDict, Self, Literal
 
 import numpy as np
 import pandas as pd
-from IsoSpecPy import ParseFormula, IsoDistribution
+from IsoSpecPy import ParseFormula, IsoDistribution, IsoTotalProb
 from matplotlib import pyplot as plt
 from msIO import PeakList
 from scipy.optimize import least_squares, OptimizeResult, minimize
@@ -12,7 +13,7 @@ from LipidCalculator import CompoundDict
 from LipidCalculator.isotopes.standards_and_deltas import f_VPDB_C13, f_VSMOV_H2, ATOM2ISOS, DEFAULT_MASS_TOLERANCE, \
     C13C12to_delta13C, H2H1to_delta13C, O17O16to_delta17O, S34S32to_delta34S, delta13C_to_f, delta2H_to_f, \
     delta17O_to_f, delta34S_to_f
-from LipidCalculator.rdkit.adduct.parser import get_adduct_mass_and_charge
+from LipidCalculator.rdkit.adduct.parser import get_adduct_mass_and_charge, convert_molecule_mass_to_mz
 from LipidCalculator.isotopes.isotopes import isotope_properties as isotope_properties
 
 import IsoSpecPy as isospec
@@ -173,6 +174,20 @@ class IsotopePattern:
             'number of entries for masses and intensities do not match'
         self.n_peaks: int = len(self.masses)
 
+    @classmethod
+    def from_formula(cls, formula: str, adduct: str = None, mass_accuracy: float = None) -> Self:
+        ms1 = IsoTotalProb(formula=formula, prob_to_cover=.9999)
+        # shift/scale masses according to adduct
+        mzs = list(ms1.masses)
+        if adduct is not None:
+            m_adduct, z_adduct = get_adduct_mass_and_charge(adduct)
+            mzs = [convert_molecule_mass_to_mz(m, m_adduct, z_adduct) for m in mzs]
+
+        new = cls(mzs, ms1.probs)
+        if mass_accuracy is not None:
+            new.bin_close_weighted(mass_tol=mass_accuracy)
+        return new
+
     def bin_into_targets(
             self,
             iso_masses_measured: Iterable[float],
@@ -209,6 +224,40 @@ class IsotopePattern:
             map(lambda m: round(m / mass_tol) * mass_tol, self.masses)
         )
         self.bin_into_targets(bins, mass_tol=mass_tol)
+
+    def bin_close_weighted(self, mass_tol: float):
+        """merge close mz values until the smallest difference is above the mass tolerance"""
+        all_above_tol = False
+        while not all_above_tol:
+            # look for mass pair below mass tolerance
+            for (idx1, (i1, mz1)), (idx2, (i2, mz2)) in product(
+                    enumerate(zip(self.intensities, self.masses)),
+                    enumerate(zip(self.intensities, self.masses))
+            ):
+                if idx1 == idx2:
+                    continue
+                dmz = abs(mz1 - mz2)
+                if dmz > mass_tol:
+                    continue
+                # found close mz values
+                # merge mz and intensity values
+                mz_new = (mz1 * i1 + mz2 * i2) / (i1 + i2)
+                i_new = i1 + i2
+
+                # pop the bigger index first
+                for idx in sorted([idx1, idx2], reverse=True):
+                    self.intensities.pop(idx)
+                    self.masses.pop(idx)
+                # insert the merged values
+                self.intensities.append(i_new)
+                self.masses.append(mz_new)
+                break
+            else:
+                all_above_tol = True
+
+        # sort by masses
+        self.masses, self.intensities = zip(*sorted(zip(self.masses, self.intensities)))
+        self.n_peaks = len(self.masses)
 
     def plot(self, ax: plt.Axes | None = None, shift: int = 0, **kwargs) -> plt.Axes:
         if ax is None:
@@ -542,15 +591,36 @@ def test_multi_delta_fit():
     plt.show()
 
 
+def get_iso_pattern_for_compound(formula: str, adduct: str, custom_isotope_ratios=None) -> PeakList:
+    m_adduct, z_adduct = get_adduct_mass_and_charge(adduct)
+
+    ms1 = IsoTotalProb(formula=formula, prob_to_cover=.9999)
+    # shift/scale masses according to adduct
+    mzs = np.array([convert_molecule_mass_to_mz(m, m_adduct, z_adduct) for m in ms1.masses])
+    ints = np.array(list(ms1.probs))
+
+    iso_pattern = IsotopePattern(mzs, ints)
+
+    return PeakList(mzs=mzs, intensities=ints)
+
+
 if __name__ == '__main__':
     pass
 
-    ms1_measured = PeakList(
-        mzs=[690.57093, 691.57305, 692.57612],
-        intensities=[137821, 64095, 28280]
-    )
+    formula = 'C43H88O3'
+    adduct = '[M+H]+'
 
-    res = predict_deltas_for_ms1(ms1_measured, formula='C39H79NO6S', adduct_type='[M+H]+', atoms_to_fit='CS',
-                                 plts=True)
+    iso_pattern = IsotopePattern.from_formula(formula, adduct)
+    iso_pattern.plot()
 
-    print(res)
+    iso_pattern.bin_close_weighted(.005)
+    iso_pattern.plot()
+    # ms1_measured = PeakList(
+    #     mzs=[690.57093, 691.57305, 692.57612],
+    #     intensities=[137821, 64095, 28280]
+    # )
+    #
+    # res = predict_deltas_for_ms1(ms1_measured, formula='C39H79NO6S', adduct_type='[M+H]+', atoms_to_fit='CS',
+    #                              plts=True)
+    #
+    # print(res)
