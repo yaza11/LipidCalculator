@@ -429,7 +429,7 @@ def predict_deltas_for_ms1(
     return model.iso_table.dataframe.delta.to_dict()
 
 
-def direct_predict_d13C(formula, iso_pattern: IsotopePattern, d2H: float = -200) -> float:
+def direct_predict_d13C(formula, iso_pattern: IsotopePattern | tuple, d2H: float = -200) -> float:
     """Assume H O N occur with their natural abundances"""
     parsed = ParseFormula(formula)
     nH = parsed.get('H', 0)
@@ -437,8 +437,11 @@ def direct_predict_d13C(formula, iso_pattern: IsotopePattern, d2H: float = -200)
     nO = parsed.get('O', 0)
     nN = parsed.get('N', 0)
 
-    M0 = iso_pattern.intensities[0]
-    M1 = iso_pattern.intensities[1]
+    if isinstance(iso_pattern, IsotopePattern):
+        I0, I1 = iso_pattern.intensities[:1]
+    else:
+        assert len(iso_pattern) == 2
+        I0, I1 = iso_pattern
     f_H = f_VSMOV_H2 * (d2H / 1000 + 1)
     # note: in equation in manuscript we are not dividing by 1 + f_H but this
     # changes the H contribution only by a factor of .9999 (assuming d2H = -200)
@@ -448,7 +451,7 @@ def direct_predict_d13C(formula, iso_pattern: IsotopePattern, d2H: float = -200)
 
     # M1_corr = M1 - contribution_H - contribution_O - contribution_N
     # rC13 = M1_corr / M0 / nC
-    rC13 = (M1 / M0 - contribution_H - contribution_O - contribution_N) / nC
+    rC13 = (I1 / I0 - contribution_H - contribution_O - contribution_N) / nC
     return (rC13 / f_VPDB_C13 - 1) * 1000
 
 
@@ -589,19 +592,6 @@ def test_multi_delta_fit():
     fitted_pattern.iso_pattern.plot(ax=ax, linefmt='red', shift=2)
     ax.legend(['unbiased', 'measured', 'predicted', 'predicted scalar'])
     plt.show()
-
-
-def get_iso_pattern_for_compound(formula: str, adduct: str, custom_isotope_ratios=None) -> PeakList:
-    m_adduct, z_adduct = get_adduct_mass_and_charge(adduct)
-
-    ms1 = IsoTotalProb(formula=formula, prob_to_cover=.9999)
-    # shift/scale masses according to adduct
-    mzs = np.array([convert_molecule_mass_to_mz(m, m_adduct, z_adduct) for m in ms1.masses])
-    ints = np.array(list(ms1.probs))
-
-    iso_pattern = IsotopePattern(mzs, ints)
-
-    return PeakList(mzs=mzs, intensities=ints)
 
 
 if __name__ == '__main__':
