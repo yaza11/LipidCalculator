@@ -180,8 +180,8 @@ class IsotopePattern:
         # shift/scale masses according to adduct
         mzs = list(ms1.masses)
         if adduct is not None:
-            m_adduct, z_adduct = get_adduct_mass_and_charge(adduct)
-            mzs = [convert_molecule_mass_to_mz(m, m_adduct, z_adduct) for m in mzs]
+            m_adduct, z_adduct, mul = get_adduct_mass_and_charge(adduct)
+            mzs = [convert_molecule_mass_to_mz(m, m_adduct, z_adduct, mul) for m in mzs]
 
         new = cls(mzs, ms1.probs)
         if mass_accuracy is not None:
@@ -225,8 +225,9 @@ class IsotopePattern:
         )
         self.bin_into_targets(bins, mass_tol=mass_tol)
 
-    def bin_close_weighted(self, mass_tol: float):
+    def bin_close_weighted(self, mass_tol: float = None, resolution: int = None):
         """merge close mz values until the smallest difference is above the mass tolerance"""
+        assert (tol_is_abs := (mass_tol is not None)) ^ (resolution is not None)
         all_above_tol = False
         while not all_above_tol:
             # look for mass pair below mass tolerance
@@ -237,7 +238,11 @@ class IsotopePattern:
                 if idx1 == idx2:
                     continue
                 dmz = abs(mz1 - mz2)
-                if dmz > mass_tol:
+                if tol_is_abs:
+                    if dmz > mass_tol:
+                        continue
+                # merge if R < m / dm ==> dm < m / R
+                elif dmz > (mz1 / 2 + mz2 / 2) / resolution:
                     continue
                 # found close mz values
                 # merge mz and intensity values
@@ -412,7 +417,7 @@ def predict_deltas_for_ms1(
     ...
     mzs = ms1_pattern.mzs
     # convert to M using adduct_type
-    adduct_mass, adduct_charge = get_adduct_mass_and_charge(adduct_type, format_template='metaboscape')
+    adduct_mass, adduct_charge, *_ = get_adduct_mass_and_charge(adduct_type, format_template='metaboscape')
     Ms = [mz * adduct_charge - adduct_mass for mz in mzs]
     iso_pattern = IsotopePattern(
         masses=Ms,

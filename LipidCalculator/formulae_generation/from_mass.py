@@ -150,13 +150,12 @@ def get_unconstrained_candidates_fast(
     # update current mass
     mz_current: float = (current_formula * elements).sum()
 
-    if abs(mz - mz_current) < tolerance:
+    if abs(mz - mz_current) <= tolerance:
         # reached target mass, return
         return [current_formula.copy()]
     elif mz_current > mz + tolerance:
         return []
     else:
-
         for i, el in enumerate(elements):
             if not elements_whitelist[i]:
                 continue
@@ -178,15 +177,26 @@ def get_unconstrained_candidates_fast(
 
 
 def check_constraint(formula: CompoundDict, constraint: tuple) -> bool:
+    # e.g. ('H', '>=', 0.2, 'C') --> nH >= 0.2 * nC
     el1, operation, lim, *el2 = constraint
+    n_el1 = formula.composition.get(el1, 0)
 
-    if len(el2):
-        lim = formula.composition[el2[0]] * lim
+    if len(el2) > 0:
+        n_el2 = formula.composition.get(el2[0], 0)
+        if operation == ">=":
+            return n_el1 >= lim * n_el2
+        elif operation == "<=":
+            return n_el1 <= lim * n_el2
+
+    # convert lim to absolute if it is provided as float
+    if isinstance(lim, float):
+        # multiply with number of atoms in the formula
+        lim = sum(formula.composition.values()) * lim
 
     if operation == ">=":
-        return el1 >= lim
+        return n_el1 >= lim
     elif operation == "<=":
-        return el1 <= lim
+        return n_el1 <= lim
     else:
         raise NotImplementedError(f'{operation} not implemented!')
 
@@ -196,10 +206,6 @@ def check_constraints(formula: CompoundDict, constraints: Constraint) -> bool:
         if not check_constraint(formula, constraint):
             return False
     return True
-
-
-def restrict_el_counts(mz, elements):
-    pass
 
 
 def get_candidates(
@@ -287,13 +293,38 @@ if __name__ == '__main__':
     # res = get_candidates(1245.289175, tolerance=3e-3, ionization=0, elements='C H N O'.split())
     # mz = 180.063390
 
-    mz = 551.749
-    tolerance = 6e-3  # mDa
-    mzs = [92.04369999999994]
-    res_slow = get_unconstrained_candidates(mzs[0], tolerance=tolerance, elements='C H N O P S'.split())
-    for cd in res_slow:
-        print(cd.formula, cd.mass)
-    elements = 'C H N O P S'.split()
+    mz = 438.68251 - CompoundDict('H+').mass
+    tolerance = mz * 10e-6
+    # mzs = [92.04369999999994]
+    # res_slow = get_unconstrained_candidates(mzs[0], tolerance=tolerance, elements='C H N O P S'.split())
+    # for cd in res_slow:
+    #     print(cd.formula, cd.mass)
+    elements = 'C H N O P S Zn Fe Co U'.split()
+    element_masses = [CompoundDict(el).mass for el in elements]
+    mass_to_el = dict(zip(element_masses, elements))
+    params_fast = preprocess_params(mz=mz, tolerance=tolerance, elements=elements)
+    elements_sorted = [mass_to_el[m] for m in params_fast[2]]
+
+    res = get_unconstrained_candidates_fast(*params_fast)
+    res_fast = [CompoundDict(dict(zip(elements_sorted, [int(i) for i in r]))).formula for r in res]
+
+    c = Constraint()
+    c.add_constrain_ratio('H', (0, .5))
+    c.add_constrain_abundance('Zn', (0, 3))
+    c.add_constrain_abundance('Fe', (0, 2))
+    c.add_constrain_abundance('Co', (0, 3))
+    c.add_constrain_abundance('U', (0, 2))
+    c.add_constrain_relative_ratio('H', 'C', (0.2, 1.))
+
+    print('Formula mass/Da dmz/mDa')
+    res_con = []
+    for r in res_fast:
+        f = CompoundDict(r)
+        m = f.mass
+        check_constraint(f, c.constraints[0])
+        if check_constraints(f, c.constraints):
+            print(f'{r} {m:.4f} {abs(m - mz) / mz * 1e6}')
+            res_con.append(r)
 
     # plt.figure()
     # nres = []
