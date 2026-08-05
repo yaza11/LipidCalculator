@@ -13,11 +13,13 @@ from LipidCalculator import CompoundDict
 from LipidCalculator.isotopes.standards_and_deltas import f_VPDB_C13, f_VSMOV_H2, ATOM2ISOS, DEFAULT_MASS_TOLERANCE, \
     C13C12to_delta13C, H2H1to_delta13C, O17O16to_delta17O, S34S32to_delta34S, delta13C_to_f, delta2H_to_f, \
     delta17O_to_f, delta34S_to_f
-from LipidCalculator.rdkit.adduct.parser import get_adduct_mass_and_charge, convert_molecule_mass_to_mz
+from LipidCalculator.rdkit.adduct.parser import _get_adduct_composition, Adduct
 from LipidCalculator.isotopes.isotopes import isotope_properties as isotope_properties
 
 import IsoSpecPy as isospec
 import logging
+
+from LipidCalculator.util.spectrum import recursively_merge_peaks_to_resolution
 
 logger = logging.getLogger(__name__)
 
@@ -175,17 +177,35 @@ class IsotopePattern:
         self.n_peaks: int = len(self.masses)
 
     @classmethod
-    def from_formula(cls, formula: str, adduct: str = None, mass_accuracy: float = None) -> Self:
-        ms1 = IsoTotalProb(formula=formula, prob_to_cover=.9999)
-        # shift/scale masses according to adduct
-        mzs = list(ms1.masses)
+    def from_formula(
+            cls,
+            formula: str,
+            adduct: str = None,
+            mass_accuracy: float = None,
+            mass_resolution: int = None,
+            merge_method: Literal['weighted_average', 'none'] = 'none'
+    ) -> Self:
+        formula: CompoundDict = CompoundDict(formula)
         if adduct is not None:
-            m_adduct, z_adduct, mul = get_adduct_mass_and_charge(adduct)
-            mzs = [convert_molecule_mass_to_mz(m, m_adduct, z_adduct, mul) for m in mzs]
+            # multiply formula by multiplicity and add adduct elements
+            adduct: Adduct = Adduct(adduct)
+            formula: CompoundDict = formula * adduct.multiplicity + adduct.composition
+
+        ms1 = IsoTotalProb(formula=formula.formula, prob_to_cover=.9999)
+        # shift/scale masses according to adduct
+        masses = list(ms1.masses)
+        if adduct is not None:
+            mzs = [adduct.isopattern_molecule_mass_to_mz(mass) for mass in masses]
+        else:
+            mzs = masses
 
         new = cls(mzs, ms1.probs)
-        if mass_accuracy is not None:
-            new.bin_close_weighted(mass_tol=mass_accuracy)
+        if merge_method == 'none':
+            return new
+        elif merge_method == 'weighted_average':
+            new.bin_close_weighted(mass_tol=mass_accuracy, resolution=mass_resolution)
+        else:
+            raise ValueError(f'unknown merge method: {merge_method}')
         return new
 
     def bin_into_targets(
@@ -227,41 +247,9 @@ class IsotopePattern:
 
     def bin_close_weighted(self, mass_tol: float = None, resolution: int = None):
         """merge close mz values until the smallest difference is above the mass tolerance"""
-        assert (tol_is_abs := (mass_tol is not None)) ^ (resolution is not None)
-        all_above_tol = False
-        while not all_above_tol:
-            # look for mass pair below mass tolerance
-            for (idx1, (i1, mz1)), (idx2, (i2, mz2)) in product(
-                    enumerate(zip(self.intensities, self.masses)),
-                    enumerate(zip(self.intensities, self.masses))
-            ):
-                if idx1 == idx2:
-                    continue
-                dmz = abs(mz1 - mz2)
-                if tol_is_abs:
-                    if dmz > mass_tol:
-                        continue
-                # merge if R < m / dm ==> dm < m / R
-                elif dmz > (mz1 / 2 + mz2 / 2) / resolution:
-                    continue
-                # found close mz values
-                # merge mz and intensity values
-                mz_new = (mz1 * i1 + mz2 * i2) / (i1 + i2)
-                i_new = i1 + i2
-
-                # pop the bigger index first
-                for idx in sorted([idx1, idx2], reverse=True):
-                    self.intensities.pop(idx)
-                    self.masses.pop(idx)
-                # insert the merged values
-                self.intensities.append(i_new)
-                self.masses.append(mz_new)
-                break
-            else:
-                all_above_tol = True
-
-        # sort by masses
-        self.masses, self.intensities = zip(*sorted(zip(self.masses, self.intensities)))
+        self.masses, self.intensities = recursively_merge_peaks_to_resolution(
+            self.masses, self.intensities, mass_tol, resolution
+        )
         self.n_peaks = len(self.masses)
 
     def plot(self, ax: plt.Axes | None = None, shift: int = 0, **kwargs) -> plt.Axes:
@@ -417,7 +405,7 @@ def predict_deltas_for_ms1(
     ...
     mzs = ms1_pattern.mzs
     # convert to M using adduct_type
-    adduct_mass, adduct_charge, *_ = get_adduct_mass_and_charge(adduct_type, format_template='metaboscape')
+    adduct_mass, adduct_charge, *_ = _get_adduct_composition(adduct_type, format_template='metaboscape')
     Ms = [mz * adduct_charge - adduct_mass for mz in mzs]
     iso_pattern = IsotopePattern(
         masses=Ms,
@@ -603,12 +591,9 @@ if __name__ == '__main__':
     pass
 
     formula = 'C43H88O3'
-    adduct = '[M+H]+'
+    adduct = '[M+H2]2+'
 
-    iso_pattern = IsotopePattern.from_formula(formula, adduct)
-    iso_pattern.plot()
-
-    iso_pattern.bin_close_weighted(.005)
+    iso_pattern = IsotopePattern.from_formula(formula, adduct, mass_resolution=40_000)
     iso_pattern.plot()
     # ms1_measured = PeakList(
     #     mzs=[690.57093, 691.57305, 692.57612],

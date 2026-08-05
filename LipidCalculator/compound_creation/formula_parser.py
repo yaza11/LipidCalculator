@@ -438,6 +438,36 @@ class CompoundDict:
         return self.__class__(self.composition.copy())
 
 
+def parse_equation(eq: str) -> CompoundDict:
+    """
+    Transform an expression to a compound dict. Constituents must not be charged and multiplicity must be added as index
+    (so instead of 2 H2O write (H2O)2). Example: '- H2O + H'
+    """
+    eq = eq.replace(' ', '')
+    if (not eq.startswith('-')) and (not eq.startswith('+')):  # make sure each constituent is preceded by + or -
+        eq = '+' + eq
+    parts = []
+    links = []
+
+    # split into links and parts
+    cpd = ''
+    for symbol in eq[::-1]:
+        if symbol in '+-':
+            links.append(symbol)
+            parts.append(cpd[::-1])
+            cpd = ''
+        else:
+            cpd += symbol
+
+    expr = ''
+    for link, cpd in zip(links[::-1], parts[::-1]):
+        if len(expr) > 0:
+            expr += ' + '
+        mult = ' * 1' if link == '+' else ' * (-1)'
+        expr += f'CompoundDict("{cpd}")' + mult
+    return eval(expr)
+
+
 def test_neg():
     s = f'C6{NEG_SIGN}O2'
     cd = CompoundDict(s)
@@ -500,11 +530,15 @@ if __name__ == '__main__':
 
     # test_neg()
 
-    e_plus = CompoundDict('H-').mass - CompoundDict('H').mass
-    formula_c37_3 = 'C37H70ONa'
-    formula_cren = 'C82H154O6Na'
-    mz_C37_3 = CompoundDict(formula_c37_3).mass - e_plus
-    mz_cren = CompoundDict(formula_cren).mass - e_plus
+    eq = '-H2O + H'
+    eq = 'H+H'
+    print(parse_equation(eq))
+
+    # e_plus = CompoundDict('H-').mass - CompoundDict('H').mass
+    # formula_c37_3 = 'C37H70ONa'
+    # formula_cren = 'C82H154O6Na'
+    # mz_C37_3 = CompoundDict(formula_c37_3).mass - e_plus
+    # mz_cren = CompoundDict(formula_cren).mass - e_plus
     # parse_formula('H+H')
 
     # for i in range(5):

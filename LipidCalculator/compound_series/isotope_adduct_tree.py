@@ -10,10 +10,10 @@ from IsoSpecPy import IsoDistribution, IsoTotalProb
 
 from LipidCalculator import CompoundDict
 from LipidCalculator.isotopes.iso_frac_predict import IsotopePattern
-from LipidCalculator.rdkit.adduct.parser import get_mz_from_M_and_adduct, get_adduct_mass_and_charge
+from LipidCalculator.rdkit.adduct.parser import get_mz_from_M_and_adduct, _get_adduct_composition
 
 default_adducts = [
-    '[M]+'
+    '[M]+',
     '[M+H]+',
     '[M+NH4]+',
     '[M+Na]+',
@@ -68,7 +68,7 @@ def get_mzs_for_molecule(
 
 
 def get_mass_from_mz_and_adduct(mz: float, adduct: str) -> float:
-    add_mass, add_c, molecule_multiplicity = get_adduct_mass_and_charge(adduct)
+    add_mass, add_c, molecule_multiplicity = _get_adduct_composition(adduct)
     return (mz * add_c - add_mass) / molecule_multiplicity
 
 
@@ -88,10 +88,11 @@ def get_possible_adduct_diffs(mz1, mz2, mz_precision, adducts) -> list[tuple[str
 
 
 if __name__ == '__main__':
+    # check against https://www.envipat.eawag.ch/index.php
     pattern = get_mzs_for_molecule(
         'C43H88O3',
-        adduct_types=['[M+H]+', '[M+NH4]+', '[M+Na]+', '[M]+'],
-        adduct_abundances=[1, 1, 1, .2],
+        adduct_types=['[M2+H]+'],
+        adduct_abundances=[1],
         explained_intensity_isopattern=0.999
     )
 
