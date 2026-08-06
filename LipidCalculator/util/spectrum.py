@@ -1,7 +1,8 @@
 from itertools import product
 
 
-def recursively_merge_peaks_to_resolution(mzs, intensities, mz_tol: int = None, resolution: int = None):
+def recursively_merge_peaks_to_resolution(mzs, intensities, mz_tol: int = None, resolution: int = None) -> tuple[
+    list, list]:
     assert (tol_is_abs := (mz_tol is not None)) ^ (resolution is not None)
     all_above_tol = False
 
@@ -40,4 +41,6 @@ def recursively_merge_peaks_to_resolution(mzs, intensities, mz_tol: int = None, 
             all_above_tol = True
 
     # sort by masses
-    return zip(*sorted(zip(mzs, intensities)))
+    #  this first pairs each mz and intensity, sorts by mass (and intensity on second order)
+    s = tuple(zip(*sorted(zip(mzs, intensities))))
+    return list(s[0]), list(s[1])

@@ -168,10 +168,16 @@ class IsoTable:
 
 
 class IsotopePattern:
-    def __init__(self, masses, intensities):
+    masses: list[float] = None
+    intensities: list[float] = None
+    n_peaks: int = None
+
+    def __init__(self, masses, intensities, normalize=False):
         self.masses: list[float] = list(masses)
-        i_max = max(intensities)
-        self.intensities: list[float] = [i / i_max for i in intensities]
+        if normalize:
+            i_max = max(intensities)
+            intensities = [i / i_max for i in intensities]
+        self.intensities: list[float] = list(intensities)
         assert len(self.masses) == len(self.intensities), \
             'number of entries for masses and intensities do not match'
         self.n_peaks: int = len(self.masses)
@@ -245,7 +251,7 @@ class IsotopePattern:
         )
         self.bin_into_targets(bins, mass_tol=mass_tol)
 
-    def bin_close_weighted(self, mass_tol: float = None, resolution: int = None):
+    def bin_close_weighted(self, *, mass_tol: float = None, resolution: int = None):
         """merge close mz values until the smallest difference is above the mass tolerance"""
         self.masses, self.intensities = recursively_merge_peaks_to_resolution(
             self.masses, self.intensities, mass_tol, resolution
@@ -273,6 +279,19 @@ class IsotopePattern:
 
     def __repr__(self) -> str:
         return self.as_dataframe().to_string()
+
+    def combine_with(
+            self,
+            other: Self,
+            merge_method: Literal['none', 'weighted_average'] = 'none',
+            mass_resolution=None
+    ) -> Self:
+        masses = self.masses + other.masses
+        intensities = self.intensities + other.intensities
+        new = self.__class__(masses, intensities)
+        if merge_method == 'weighted_average':
+            new.bin_close_weighted(resolution=mass_resolution)
+        return new
 
 
 class IsoPatternFit:

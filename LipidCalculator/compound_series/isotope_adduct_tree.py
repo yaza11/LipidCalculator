@@ -9,8 +9,8 @@ import pandas as pd
 from IsoSpecPy import IsoDistribution, IsoTotalProb
 
 from LipidCalculator import CompoundDict
-from LipidCalculator.isotopes.iso_frac_predict import IsotopePattern
-from LipidCalculator.rdkit.adduct.parser import get_mz_from_M_and_adduct, _get_adduct_composition
+from LipidCalculator.isotopes.isotope_pattern import IsotopePattern
+from LipidCalculator.rdkit.adduct.parser import _get_adduct_composition
 
 default_adducts = [
     '[M]+',
@@ -36,35 +36,22 @@ def get_mzs_for_molecule(
         resolution: int = 40_000,
         adduct_abundances: list[int | float] = None
 ) -> IsotopePattern:
-    if isinstance(formula, str):
-        comp: CompoundDict = CompoundDict(formula)
-    else:
-        assert isinstance(formula, CompoundDict)
-        comp: CompoundDict = formula
     if adduct_abundances is None:
         adduct_abundances = [1] * len(adduct_types)
 
     # level 1: molecule masses of isotopes
-    pattern: IsoDistribution = IsoTotalProb(
-        prob_to_cover=explained_intensity_isopattern, formula=comp.formula
-    )
-    masses_isotopes: list[float] = list(pattern.masses)
-    ints_isotopes: list[float] = list(pattern.probs)
-
-    # level 2: for each isotope, generate the m/z for the adduct types
-    mzs: list[float] = []
-    ints: list[float] = []
-    for (iso_mass, iso_int), (adduct, adduct_weight) in product(
-            zip(masses_isotopes, ints_isotopes),
-            zip(adduct_types, adduct_abundances)
-    ):
-        mzs.append(get_mz_from_M_and_adduct(iso_mass, adduct))
-        ints.append(iso_int * adduct_weight)
-
-    # coarse-grain to resolving power m / dm
-    isopattern = IsotopePattern(masses=mzs, intensities=ints)
-    isopattern.bin_close_weighted(resolution=resolution)
-    return isopattern
+    patterns: list[IsotopePattern] = []
+    for adduct, abd in zip(adduct_types, adduct_abundances):
+        p = IsotopePattern.from_formula(formula=formula, adduct=adduct, mass_resolution=resolution,
+                                        merge_method='weighted_average')
+        p.intensities = [i * abd for i in p.intensities]
+        patterns.append(
+            p
+        )
+    pattern = patterns[0]
+    for p in patterns[1:]:
+        pattern = pattern.combine_with(p, merge_method='weighted_average', mass_resolution=resolution)
+    return pattern
 
 
 def get_mass_from_mz_and_adduct(mz: float, adduct: str) -> float:
@@ -91,8 +78,8 @@ if __name__ == '__main__':
     # check against https://www.envipat.eawag.ch/index.php
     pattern = get_mzs_for_molecule(
         'C43H88O3',
-        adduct_types=['[M2+H]+'],
-        adduct_abundances=[1],
+        adduct_types=['[M+H]+', '[M+Na]+'],
+        adduct_abundances=[1, 1, 1],
         explained_intensity_isopattern=0.999
     )
 
