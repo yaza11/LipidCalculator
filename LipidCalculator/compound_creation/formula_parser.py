@@ -9,7 +9,7 @@ from typing import Self
 from rdkit.Chem import Mol, GetFormalCharge
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
-from LipidCalculator.isotopes.isotopes import isotope_mass
+from LipidCalculator.isotopes.isotopes import isotope_mass, element_to_most_common_isotope_notation
 from LipidCalculator.isotopes.elements import elements
 
 NEG_SIGN: str = chr(0x2796)
@@ -309,13 +309,18 @@ class CompoundDict:
             self.composition['+'] = self.composition.get('+', 0) - self.composition.pop('-')
 
     def clean(self) -> None:
+        def _strip_most_common_isotope_notation(iso: str) -> str:
+            if '[' not in iso:
+                return iso
+            el = iso.split('[')[0]
+            if element_to_most_common_isotope_notation[el] == iso:
+                return el
+            return iso
+
         self._clean_charge()
-        # new_dict = {}
-        # for k, v in self.composition.items():
-        #     if v != 0:
-        #         new_dict[k] = v
-        # self._composition = new_dict
-        self._composition = {k: v for k, v in self.composition.items() if v != 0}
+        # if isotope has been specified but it is the most common one, remove notation
+        self._composition = {_strip_most_common_isotope_notation(iso): count for iso, count in self.composition.items()
+                             if count != 0}
 
     @property
     def composition(self) -> dict[str, float | int]:
@@ -403,14 +408,18 @@ class CompoundDict:
         # self._composition = new_dict
         return type(self)(new_dict)
 
+    def __rmul__(self, other: float | int) -> Self:
+        return self.__mul__(other)
+
     def __neg__(self) -> Self:
         return self.__mul__(-1)
 
     def __hash__(self) -> int:
+        # formula uniquely defined through composition
         return hash(self.formula)
 
     def __eq__(self, other: Self) -> bool:
-        return self.composition == other.composition
+        return self.__hash__() == other.__hash__()
 
     def __repr__(self) -> str:
         return str(self.composition)

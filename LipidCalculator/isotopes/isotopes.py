@@ -81,6 +81,9 @@ most_common_isotopes_to_mass_number: dict[str, int] = (
 most_common_isotopes_to_mass_number['+'] = 0
 most_common_isotopes_to_mass_number['-'] = 0
 
+element_to_most_common_isotope_notation: dict[str, str] = {row.Element: f'{row.Element}[{row.loc['Mass number']}]' for
+                                                           _, row in most_common_isotopes.iterrows()}
+
 
 class Isotope:
     """Container for isotope properties."""
