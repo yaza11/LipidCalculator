@@ -91,15 +91,21 @@ class Adduct:
             return
 
         adduct_composition, charge_str = _split_adduct_and_charge(adduct)
-        self.charge = _parse_charge(charge_str)
+        self.charge: int = _parse_charge(charge_str)
         multiplicity, adduct_composition = _strip_molecule_multiplicity(adduct_composition)
-        adduct_composition = _get_adduct_composition(adduct_composition)
+        adduct_composition: CompoundDict = _get_adduct_composition(adduct_composition)
+        # charge is part of composition so that we get correct mass
+        adduct_composition: CompoundDict = adduct_composition + CompoundDict({"+": self.charge})
 
-        self.multiplicity = multiplicity
-        self.composition = adduct_composition
+        self.multiplicity: int = multiplicity
+        self.composition: CompoundDict = adduct_composition
 
     def __repr__(self):
         return self.__dict__.__repr__()
+
+    @property
+    def mass(self) -> float:
+        return self.composition.mass
 
     def mass_to_mz(self, mass: float):
         return (mass * self.multiplicity + self.composition.mass - m_e * self.charge) / abs(self.charge)
