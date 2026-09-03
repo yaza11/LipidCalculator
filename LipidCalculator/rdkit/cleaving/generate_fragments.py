@@ -6,13 +6,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from rdkit import Chem
-from rdkit.Chem import Mol, rdMolDescriptors, inchi, GetFormalCharge, RWMol, Atom, AddHs, BondType
+from rdkit.Chem import Mol, rdMolDescriptors, inchi, GetFormalCharge, RWMol, Atom, AddHs
 from rdkit.Chem.Descriptors import ExactMolWt
 from rdkit.Chem.rdmolops import SanitizeMol
 
 from LipidCalculator import CompoundDict
-from LipidCalculator.rdkit.adduct.util import get_mol_with_adduct, add_formal_charge_for_atom, \
-    find_available_bond_locations_for_adduct, steal_pos_charge_from_adduct
+from LipidCalculator.adduct import get_mol_with_adduct, find_available_bond_locations_for_adduct, \
+    steal_pos_charge_from_adduct
 
 from LipidCalculator.rdkit.cleaving.alpha_cleavage import find_alpha_cleavage_positions, get_alpha_cleaved
 from LipidCalculator.rdkit.cleaving.inductive_cleavage import get_inductively_cleaved, find_inductive_cleavage_positions
@@ -20,8 +20,7 @@ from LipidCalculator.rdkit.cleaving.sigma_cleavage import find_sigma_cleavage_po
 from LipidCalculator.rdkit.plotting import mol_to_img, plt_indices_bond
 import logging
 
-from LipidCalculator.rdkit.util import get_num_hs, remove_one_h_for_atom, check_hs_treated_as_neighbors, \
-    add_one_h_for_atom
+from LipidCalculator.rdkit.util import check_hs_treated_as_neighbors
 
 logger = logging.getLogger(__name__)
 
@@ -756,7 +755,7 @@ if __name__ == "__main__":
 
     name = 'PE DAG C17:0 C16:1'
     mol = ipl_automatic_bonds(
-        name.split(), plts=False, idx_plt=False, split_chain=False
+        name.split(), plts=True, idx_plt=False, split_chain=False
     )
     mol = AddHs(mol)
     plt_indices_bond(mol)
@@ -805,7 +804,7 @@ if __name__ == "__main__":
         cleavage_types=['INDUCTIVE', 'ALPHA'],
     )
     # tree.plot_ions()
-    # fig = tree.plot_ms2(add_struct_plots=False, res_pixels_child=500)
+    fig = tree.plot_ms2(add_struct_plots=True, res_pixels_child=500)
 
     # plt_indices_bond([mol])
     # cleavage_pos = find_cleavage_bonds(mol)

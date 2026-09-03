@@ -5,12 +5,10 @@ from the isotopes and their adducts
 from itertools import product
 
 import numpy as np
-import pandas as pd
-from IsoSpecPy import IsoDistribution, IsoTotalProb
 
 from LipidCalculator import CompoundDict
 from LipidCalculator.isotopes.isotope_pattern import IsotopePattern
-from LipidCalculator.rdkit.adduct.parser import _get_adduct_composition
+from LipidCalculator.adduct.parser import _get_adduct_composition
 
 default_adducts = [
     '[M]+',

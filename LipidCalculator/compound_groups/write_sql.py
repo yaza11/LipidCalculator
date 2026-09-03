@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from tqdm import tqdm
 
 from LipidCalculator.rdkit.cleaving import get_fragments
-from LipidCalculator.rdkit.adduct.rdkit_add_adduct import add_adduct_to_heteroatom
+from LipidCalculator.adduct import add_adduct_to_heteroatom
 from LipidCalculator.compound_groups.intact_polar_lipids.generate_ipl import ipl_automatic_bonds
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import ABBREVIATION_TO_GROUP
 from LipidCalculator.compound_groups.to_sql import submit_to_db_inside_session

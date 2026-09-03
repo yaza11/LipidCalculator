@@ -1,5 +1,4 @@
 """Given a formula, predict the isotope pattern"""
-from itertools import product
 from typing import Iterable, OrderedDict, Self, Literal
 
 import numpy as np
@@ -13,7 +12,7 @@ from LipidCalculator import CompoundDict
 from LipidCalculator.isotopes.standards_and_deltas import f_VPDB_C13, f_VSMOV_H2, ATOM2ISOS, DEFAULT_MASS_TOLERANCE, \
     C13C12to_delta13C, H2H1to_delta13C, O17O16to_delta17O, S34S32to_delta34S, delta13C_to_f, delta2H_to_f, \
     delta17O_to_f, delta34S_to_f
-from LipidCalculator.rdkit.adduct.parser import _get_adduct_composition, Adduct
+from LipidCalculator.adduct.parser import _get_adduct_composition, Adduct
 from LipidCalculator.isotopes.isotopes import isotope_properties as isotope_properties
 
 import IsoSpecPy as isospec

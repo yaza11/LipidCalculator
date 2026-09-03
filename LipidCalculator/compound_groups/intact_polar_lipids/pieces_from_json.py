@@ -3,6 +3,19 @@ import json
 
 import pandas as pd
 
+
+def smiles_to_formula(smiles):
+    from rdkit import Chem
+    from rdkit.Chem import rdMolDescriptors
+
+    mol = Chem.MolFromSmiles(smiles)
+
+    if mol is None:
+        return None
+
+    return rdMolDescriptors.CalcMolFormula(mol)
+
+
 PLACEHOLDER_ELEMENTS: list[str] = ['Fr', 'Cs', 'Rb']
 
 # C atoms beyond placeholders have to be included in chain
@@ -54,5 +67,7 @@ def get_smiles(name: str) -> str:
 
 
 if __name__ == '__main__':
+    DATA_FRAME_IPL_PIECES.loc[:, 'formula'] = DATA_FRAME_IPL_PIECES.SMILES.apply(smiles_to_formula)
+
     print(get_entry_by_abbreviation('DAG'))
     print(get_smiles('DAG'))
