@@ -53,7 +53,7 @@ class Adduct:
     multiplicity: int = None
     composition: CompoundDict = None
 
-    def __init__(self, adduct: str):
+    def __init__(self, adduct: str = None):
         """
         Examples:
           different notations
@@ -77,6 +77,9 @@ class Adduct:
 
         :param adduct: string to parse
         """
+        if adduct is None:
+            return
+
         # handle simplified notation
         if '[' not in adduct:
             c = adduct[-1]
@@ -100,9 +103,21 @@ class Adduct:
         self.multiplicity: int = multiplicity
         self.composition: CompoundDict = adduct_composition
 
+    @classmethod
+    def from_props(cls, multiplicity: int, charge: int, composition: CompoundDict, adduct: str | None = None):
+        new = cls(None)
+        new.multiplicity = multiplicity
+        new.charge = charge
+        new.composition = composition
+        new.adduct = adduct
+        return new
+
+    def copy(self):
+        return Adduct.from_props(self.multiplicity, self.charge, self.composition.copy(), self.adduct)
+
     def __eq__(self, other) -> bool:
         return (self.multiplicity == other.multiplicity) and (self.charge == other.charge) and (
-                    self.composition == other.composition)
+                self.composition == other.composition)
 
     def __repr__(self) -> str:
         return self.__dict__.__repr__()
