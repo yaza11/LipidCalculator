@@ -100,7 +100,11 @@ class Adduct:
         self.multiplicity: int = multiplicity
         self.composition: CompoundDict = adduct_composition
 
-    def __repr__(self):
+    def __eq__(self, other) -> bool:
+        return (self.multiplicity == other.multiplicity) and (self.charge == other.charge) and (
+                    self.composition == other.composition)
+
+    def __repr__(self) -> str:
         return self.__dict__.__repr__()
 
     @property
