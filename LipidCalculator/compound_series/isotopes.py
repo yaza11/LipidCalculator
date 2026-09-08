@@ -16,7 +16,7 @@ class IsotopeSeries:
     ) -> None:
         self.compound: Compound = compound
         # self._set_all_isotopes(min_abundance_percent=min_abundance_percent)
-        res = IsoTotalProb(.999, formula=self.compound.formula)
+        res = IsoTotalProb(total_abundance_percent * 1e-2, formula=self.compound.formula)
         self.masses = np.array(list(res.masses))
         self.probabilities = np.array(list(res.probs))
 
