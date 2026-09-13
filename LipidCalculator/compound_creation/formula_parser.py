@@ -3,7 +3,7 @@ making use of a custom syntax and exposing the CompoundDict class, which allows
 arithmetic operations on Compounds defined by their elemental counts."""
 from __future__ import annotations
 
-from typing import ItemsView, Iterable, Callable
+from typing import ItemsView, Iterable, Callable, Literal
 from typing import Self
 
 from rdkit.Chem import Mol, GetFormalCharge
@@ -249,8 +249,14 @@ def parse_formula(s: str) -> CompoundDict:
 class CompoundDict:
     """Wrapper around dicts."""
     _elements_sorting = set('C H O N P S'.split())
+    _check_elements: bool = True
 
-    def __init__(self, compound_dict: dict[str, float | int] | str = None, skip_cleaning=False):
+    def __init__(
+            self,
+            compound_dict: dict[str, float | int] | str = None,
+            skip_cleaning=False,
+            check_elements=True
+    ):
         if skip_cleaning:  # premature exit without checking keys and cleaning
             self._composition: dict[str, float | int] = compound_dict
             return
@@ -267,10 +273,13 @@ class CompoundDict:
         else:
             self._composition: dict[str, float | int] = compound_dict
 
-        assert all([
-            key.split('[')[0] in (elements + ['+', '-'])
-            for key in self.composition
-        ]), "provided dict contains invalid element(s)"
+        if check_elements:
+            assert all([
+                key.split('[')[0] in (elements + ['+', '-'])
+                for key in self.composition
+            ]), "provided dict contains invalid element(s)"
+        else:
+            self._check_elements = check_elements
 
         self.clean()
 
@@ -313,7 +322,7 @@ class CompoundDict:
             if '[' not in iso:
                 return iso
             el = iso.split('[')[0]
-            if element_to_most_common_isotope_notation[el] == iso:
+            if element_to_most_common_isotope_notation.get(el) == iso:
                 return el
             return iso
 
@@ -386,7 +395,7 @@ class CompoundDict:
                 new_dict[key] = value
 
         # self._composition = new_dict
-        return type(self)(new_dict)
+        return self.__class__(new_dict, check_elements=self._check_elements and other._check_elements)
 
     def __sub__(self, other: Self) -> Self:
         new_dict: dict[str, int | float] = self.composition.copy()
@@ -397,7 +406,7 @@ class CompoundDict:
                 new_dict[key] = -value
 
         # self._composition = new_dict
-        return type(self)(new_dict)
+        return self.__class__(new_dict, check_elements=self._check_elements and other._check_elements)
 
     def __mul__(self, other: float | int) -> Self:
         new_dict = self.composition.copy()
@@ -406,7 +415,7 @@ class CompoundDict:
                 new_dict[key] *= other
 
         # self._composition = new_dict
-        return type(self)(new_dict)
+        return self.__class__(new_dict, check_elements=self._check_elements)
 
     def __rmul__(self, other: float | int) -> Self:
         return self.__mul__(other)
@@ -426,6 +435,9 @@ class CompoundDict:
 
     def __getitem__(self, item: str) -> int | float:
         return self.composition[item]
+
+    def __setitem__(self, key: str, value: int | float) -> None:
+        self.composition[key] = value
 
     def items(self) -> ItemsView:
         return self.composition.items()
@@ -447,33 +459,59 @@ class CompoundDict:
         return self.__class__(self.composition.copy())
 
 
-def parse_equation(eq: str) -> CompoundDict:
+def parse_equation(eq: str, check_elements: bool = True) -> CompoundDict:
     """
     Transform an expression to a compound dict. Constituents must not be charged and multiplicity must be added as index
     (so instead of 2 H2O write (H2O)2). Example: '- H2O + H'
     """
+    eq.replace(NEG_SIGN, ' - ')
     eq = eq.replace(' ', '')
     if (not eq.startswith('-')) and (not eq.startswith('+')):  # make sure each constituent is preceded by + or -
         eq = '+' + eq
-    parts = []
-    links = []
+    parts: list[str] = []
+    links: list[Literal['+', '-']] = [eq[0]]
+    mults: list[int] = []
 
-    # split into links and parts
-    cpd = ''
-    for symbol in eq[::-1]:
-        if symbol in '+-':
-            links.append(symbol)
-            parts.append(cpd[::-1])
-            cpd = ''
-        else:
-            cpd += symbol
+    # add * if a letter follows a number
+    mult = ''
+    part = ''
+    is_mult: bool = True
+    is_part: bool = False
+    for idx, s in enumerate(eq[1:]):
+        if is_mult:  # check if we are currently running over multiplicty symbols
+            assert not s.islower(), (f'Multiplicty must be ended by an upper case '
+                                     f'letter to indicate element ({eq[:idx]}')
+            if s.isnumeric():  # multiplicty number continues
+                mult += s
+                continue
+            elif s.isalpha():
+                # flush
+                mults.append(mult)
+                mult = ''
+                is_mult = False
+                is_part = True  # next comes part
+            else:
+                raise ValueError(eq[:idx])
+        if is_part:
+            if s in '+-':  # terminates part
+                parts.append(part)
+                part = ''
+                is_part = False
+                is_mult = True
+                links.append(s)
+                continue
+            else:
+                part += s
+    # last flush is not triggered but must be part
+    parts.append(part)
 
+    # build equation from parts
     expr = ''
-    for link, cpd in zip(links[::-1], parts[::-1]):
-        if len(expr) > 0:
-            expr += ' + '
-        mult = ' * 1' if link == '+' else ' * (-1)'
-        expr += f'CompoundDict("{cpd}")' + mult
+    for link, mult, part in zip(links, mults, parts):
+        if mult == '':
+            mult = '1'
+        expr += f' {link} {mult}*CompoundDict("{part}", check_elements={check_elements})'
+
     return eval(expr)
 
 
@@ -520,8 +558,20 @@ def test_parsing():
     print('() rd numbers', s)
 
 
+def test_eq():
+    print(parse_equation('2H2O'))
+    print(parse_equation('12H2O'))
+    print(parse_equation('-2H2O'))
+    print(parse_equation('-2H2O - K'))
+    print(parse_equation('C[13] - C[12]'))
+    print(parse_equation('M + NH4', check_elements=False))
+    print(parse_equation('M[2] + NH4', check_elements=False))
+
+
 if __name__ == '__main__':
     pass
+
+    test_eq()
     # print(lexer(NEG_SIGN + 'H2O'))
     # parse_formula('((C6H12O6)())')
 
@@ -541,7 +591,7 @@ if __name__ == '__main__':
 
     eq = '-H2O + H'
     eq = 'H+H'
-    print(parse_equation(eq))
+    # print(parse_equation(eq))
 
     # e_plus = CompoundDict('H-').mass - CompoundDict('H').mass
     # formula_c37_3 = 'C37H70ONa'
