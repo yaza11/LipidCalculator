@@ -160,13 +160,10 @@ class Adduct:
         return self.composition.mass
 
     def mass_to_mz(self, mass: float):
-        return (mass * self.multiplicity + self.composition.mass - m_e * self.charge) / abs(self.charge)
+        return (mass * self.multiplicity + self.mass) / abs(self.charge)
 
     def mz_to_mass(self, mz: float):
-        return (mz * self.charge - self.composition.mass + m_e * self.charge) / self.multiplicity
-
-    def isopattern_molecule_mass_to_mz(self, mass: float):
-        return (mass - m_e * self.charge) / abs(self.charge)
+        return (mz * self.charge - self.composition.mass) / self.multiplicity
 
 
 if __name__ == '__main__':

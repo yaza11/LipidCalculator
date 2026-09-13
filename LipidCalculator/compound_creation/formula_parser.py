@@ -484,7 +484,7 @@ def parse_equation(eq: str, check_elements: bool = True) -> CompoundDict:
             if s.isnumeric():  # multiplicty number continues
                 mult += s
                 continue
-            elif s.isalpha():
+            elif s.isalpha() or s == '(':
                 # flush
                 mults.append(mult)
                 mult = ''
@@ -566,6 +566,7 @@ def test_eq():
     print(parse_equation('C[13] - C[12]'))
     print(parse_equation('M + NH4', check_elements=False))
     print(parse_equation('M[2] + NH4', check_elements=False))
+    print(parse_equation('M+H-(H2O)2', check_elements=False))
 
 
 if __name__ == '__main__':
