@@ -464,6 +464,9 @@ def parse_equation(eq: str, check_elements: bool = True) -> CompoundDict:
     Transform an expression to a compound dict. Constituents must not be charged and multiplicity must be added as index
     (so instead of 2 H2O write (H2O)2). Example: '- H2O + H'
     """
+    if len(eq) == 0:
+        return CompoundDict()
+
     eq.replace(NEG_SIGN, ' - ')
     eq = eq.replace(' ', '')
     if (not eq.startswith('-')) and (not eq.startswith('+')):  # make sure each constituent is preceded by + or -
