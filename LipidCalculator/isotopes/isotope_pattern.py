@@ -9,6 +9,7 @@ from msIO import PeakList
 from scipy.optimize import least_squares, OptimizeResult, minimize
 
 from LipidCalculator import CompoundDict
+from LipidCalculator.consts import m_e
 from LipidCalculator.isotopes.standards_and_deltas import f_VPDB_C13, f_VSMOV_H2, ATOM2ISOS, DEFAULT_MASS_TOLERANCE, \
     C13C12to_delta13C, H2H1to_delta13C, O17O16to_delta17O, S34S32to_delta34S, delta13C_to_f, delta2H_to_f, \
     delta17O_to_f, delta34S_to_f
@@ -195,12 +196,19 @@ class IsotopePattern:
             # multiply formula by multiplicity and add adduct elements
             adduct: Adduct = Adduct(adduct)
             formula: CompoundDict = formula * adduct.multiplicity + adduct.composition
+            # remove charge
+            n_electrons = -adduct.charge
+            if '+' in formula.composition:
+                formula.composition.pop('+')
+            if '-' in formula.composition:
+                formula.composition.pop('-')
 
         ms1 = IsoTotalProb(formula=formula.formula, prob_to_cover=.9999)
         # shift/scale masses according to adduct
         masses = list(ms1.masses)
         if adduct is not None:
-            mzs = [adduct.isopattern_molecule_mass_to_mz(mass) for mass in masses]
+            # add shift and factor from adduct
+            mzs = [(mass + m_e * n_electrons) / abs(n_electrons) for mass in masses]
         else:
             mzs = masses
 
