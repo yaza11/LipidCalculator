@@ -415,16 +415,13 @@ class CompoundDict:
 
     @property
     def DBE(self):
-        dbe = 1.
-        for el, el_count in self.composition.items():
-            if el not in EL_TO_DBE:
-                raise ValueError(f'element {el} not in DBE table')
-            dbe += el_count * EL_TO_DBE[el]
+        if any(el not in EL_TO_DBE for el in self.composition.keys()):
+            raise ValueError(f'some elements not in DBE table')
+        return 1. + sum(el_count * EL_TO_DBE[el] for el, el_count in self.composition.items() if el in EL_TO_DBE)
 
     def fullfills_lewis(self) -> bool:
-        # check valence
-        val = sum([ct * VALENCE_ELECTRONS[el] for el, ct in self.composition.items()])
-        return (val % 2) == 0
+        # valence (number of electrons in outer shells) must be even
+        return (sum([ct * VALENCE_ELECTRONS[el] for el, ct in self.composition.items()]) % 2) == 0
 
     def fullfills_senior(self) -> bool:
         # conditions:
