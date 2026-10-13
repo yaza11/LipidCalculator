@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='LipidCalculator',
-    version='0.2.17',
+    version='0.2.18',
     url='https://github.com/yaza11/LipidCalculator',
     author='Yannick Zander',
     author_email='yannick.zander@gmail.com',

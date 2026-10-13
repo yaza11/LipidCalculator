@@ -17,6 +17,18 @@ ALPHABET: str = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 NUMBERS: str = '0123456789'
 VALID_CHARACTERS: set[str] = set(ALPHABET.lower() + ALPHABET.upper() + NUMBERS + '.()[]')
 
+# calculating the double bond equivalent of a formula
+dbs: dict[float, list[str]] = {
+    1: 'C Si'.split(),
+    -1 / 2: 'H F Cl Br I'.split(),
+    1 / 2: 'N P'.split(),
+    0: 'O S'.split(),
+}
+EL_TO_DBE = {}
+for db, els in dbs.items():
+    for el in els:
+        EL_TO_DBE[el] = db
+
 
 def get_charge_from_str(formula: str) -> int:
     assert not (('+' in formula) and ('-' in formula)), \
@@ -384,6 +396,14 @@ class CompoundDict:
             out += NEG_SIGN + out_neg
 
         return out
+
+    @property
+    def DBE(self):
+        dbe = 1.
+        for el, el_count in self.composition.items():
+            if el not in EL_TO_DBE:
+                raise ValueError(f'element {el} not in DBE table')
+            dbe += el_count * EL_TO_DBE[el]
 
     def __add__(self, other: Self) -> Self:
         new_dict = self.composition.copy()
