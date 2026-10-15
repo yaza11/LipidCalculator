@@ -124,15 +124,17 @@ def get_unconstrained_candidates(
 
 
 def preprocess_params(
-        mz,
+        mz: float,
         tolerance: float,
         elements: list[str],
-        current_formula=None
 ):
+    """
+    Initialize vectors containing element masses (elements), which elements are still allowed to be added
+    (elements_whitelist) and the current formula (current_formula)"""
     # sort elements by weight (heaviest first)
-    elements = np.sort([CompoundDict({el: 1}).mass for el in elements])[::-1]
+    elements: np.ndarray[float] = np.sort([CompoundDict({el: 1}).mass for el in elements])[::-1]
     elements_whitelist: np.ndarray[bool] = np.ones_like(elements, dtype=bool)
-    current_formula = np.zeros_like(elements)
+    current_formula: np.ndarray[float] = np.zeros_like(elements)
 
     return mz, tolerance, elements, current_formula, elements_whitelist
 
@@ -144,7 +146,7 @@ def get_unconstrained_candidates_fast(
         current_formula: np.ndarray[float],
         elements_whitelist: np.ndarray[bool]
 ) -> list[np.ndarray[int]]:
-    # do a tree search: recursively add elements
+    """do a tree search: recursively add elements until the mz value is reached within tolerance or exceeded"""
     results = []
 
     # update current mass

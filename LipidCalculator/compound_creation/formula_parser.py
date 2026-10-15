@@ -9,6 +9,7 @@ from typing import Self
 from rdkit.Chem import Mol, GetFormalCharge
 from rdkit.Chem.rdMolDescriptors import CalcMolFormula
 
+from LipidCalculator.formulae_generation.constants_for_checks import EL_TO_DBE, VALENCE_ELECTRONS, SENIOR_VALENCES
 from LipidCalculator.isotopes.isotopes import isotope_mass, element_to_most_common_isotope_notation
 from LipidCalculator.isotopes.elements import elements
 
@@ -16,34 +17,6 @@ NEG_SIGN: str = chr(0x2796)
 ALPHABET: str = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 NUMBERS: str = '0123456789'
 VALID_CHARACTERS: set[str] = set(ALPHABET.lower() + ALPHABET.upper() + NUMBERS + '.()[]')
-
-# calculating the double bond equivalent of a formula
-dbs: dict[float, list[str]] = {
-    1: 'C Si'.split(),
-    -1 / 2: 'H F Cl Br I'.split(),
-    1 / 2: 'N P'.split(),
-    0: 'O S'.split(),
-}
-EL_TO_DBE = {}
-for db, els in dbs.items():
-    for el in els:
-        EL_TO_DBE[el] = db
-
-# Valence electron contributions for the Lewis check
-# (how many electrons can participate in a bond)
-VALENCE_ELECTRONS = {
-    "C": 4, "H": 1, "N": 5, "O": 6,
-    "P": 5, "S": 6, "F": 7, "Cl": 7,
-    "Br": 7, "I": 7, "Si": 4
-}
-
-# Conventional valences for the Senior check
-# (how many bonds an atom usually has in a molecule)
-SENIOR_VALENCES = {
-    "C": 4, "H": 1, "N": 3, "O": 2,
-    "P": 3, "S": 2, "F": 1, "Cl": 1,
-    "Br": 1, "I": 1, "Si": 4
-}
 
 
 def get_charge_from_str(formula: str) -> int:
@@ -419,11 +392,13 @@ class CompoundDict:
             raise ValueError(f'some elements not in DBE table')
         return 1. + sum(el_count * EL_TO_DBE[el] for el, el_count in self.composition.items() if el in EL_TO_DBE)
 
-    def fullfills_lewis(self) -> bool:
+    @property
+    def is_lewis(self) -> bool:
         # valence (number of electrons in outer shells) must be even
         return (sum([ct * VALENCE_ELECTRONS[el] for el, ct in self.composition.items()]) % 2) == 0
 
-    def fullfills_senior(self) -> bool:
+    @property
+    def is_senior(self) -> bool:
         # conditions:
         V = sum([SENIOR_VALENCES[el] * el_count for el, el_count in self.composition.items()])
         # total valence must be even
