@@ -1,4 +1,4 @@
-import warnings
+import logging
 
 import numpy as np
 import pandas as pd
@@ -11,6 +11,8 @@ from LipidCalculator.formulae_generation.constants_for_checks import EL_TO_DBE, 
 # TODO: encode DB, LEWIS and SENIOR check
 ELEMENTS: list[str] = ["C", "H", "N", "O", "P", "S"]
 ATOMIC_MASSES: list[float] = [CompoundDict(el).mass for el in ELEMENTS]
+
+logger = logging.getLogger(__name__)
 
 
 def get_biggest_possible_bounds(
@@ -347,10 +349,10 @@ def find_k_top_solutions(
         )
 
         if (res.status == 2) or (not res.success):
-            warnings.warn(f"Could only find {len(sols)} formulas: {res.message}")
+            logger.info(f"Could only find {len(sols)} formulas: {res.message}")
             return sols, reses
         elif res.status != 0:
-            warnings.warn(f"There is a problem with milp after {len(sols)} solutions: {res.message}")
+            logger.warning(f"There is a problem with milp after {len(sols)} solutions: {res.message}")
             return sols, reses
         sols.append([round(v) for v in res.x[1:len(ATOMIC_MASSES) + 1]])
         reses.append(res)
