@@ -163,7 +163,8 @@ class Adduct:
         return (mass * self.multiplicity + self.mass) / abs(self.charge)
 
     def mz_to_mass(self, mz: float):
-        return (mz * self.charge - self.mass) / self.multiplicity
+        # inverse of mass_to_mz, so the absolute charge is needed here as well
+        return (mz * abs(self.charge) - self.mass) / self.multiplicity
 
 
 if __name__ == '__main__':

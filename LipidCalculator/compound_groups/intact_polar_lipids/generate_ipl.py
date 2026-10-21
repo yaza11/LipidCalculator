@@ -57,7 +57,10 @@ from rdkit.Chem import rdMolDescriptors
 from rdkit.Chem.Draw import IPythonConsole
 
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import PLACEHOLDER_ELEMENTS, \
-    get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES
+    get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES, CORE_GROUPS, \
+    CHAINS_IN_ISOPRENE_UNITS
+from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_chains import modify_isoprenoid_chains, \
+    clear_chain_marks
 
 from LipidCalculator.rdkit.plotting import mplt_mol, plt_indices_bond
 from LipidCalculator.rdkit.util import add_indices, mol_from_str, get_combined
@@ -425,17 +428,14 @@ def correct_chain_length_for_core(
 def replace_OOP_with_OP(mol):
     rw_mol = Chem.RWMol(mol)  #
 
-    # Find O–O–P
-    match = rw_mol.GetSubstructMatch(Chem.MolFromSmarts("[O]-[O]-[P]"))
-    if not match:
-        return mol  # no change
+    # Find O–O–P (there can be several, e.g. for tetraethers with two head groups)
+    while match := rw_mol.GetSubstructMatch(Chem.MolFromSmarts("[O]-[O]-[P]")):
+        o1_idx, o2_idx, p_idx = match  # first O, middle O, P
 
-    o1_idx, o2_idx, p_idx = match  # first O, middle O, P
+        # Delete the middle oxygen
+        rw_mol.AddBond(o1_idx, p_idx, Chem.BondType.SINGLE)
 
-    # Delete the middle oxygen
-    rw_mol.AddBond(o1_idx, p_idx, Chem.BondType.SINGLE)
-
-    rw_mol.RemoveAtom(o2_idx)
+        rw_mol.RemoveAtom(o2_idx)
 
     Chem.SanitizeMol(rw_mol)
     return rw_mol.GetMol()
@@ -447,13 +447,18 @@ def ipl_automatic_bonds(
         sort_chains: bool = True,
         remove_double_oxygen: bool = True,
         plts=False,
-        idx_plt: bool = False
+        idx_plt: bool = False,
+        core_chains: str | None = None
 ) -> Mol:
     """
     Attempt to form bonds between pieces automatically by idenitfying piece types and placeholders.
 
     for head groups that contain a phospahte group and are connected to a glycerol backbone, it is convention to
     consider molecules that connect the OH group of the glycerol directly to P instead of having a O-O-P fragment.
+
+    cores with two attachment points (e.g. GDGTs) can take two head groups, the first one is bonded to the
+    first attachment point. core_chains sets the isoprenoid chains of the core, e.g. '20:1_25:0' for archaeols
+    (see isoprenoid_chains.py).
     """
 
     def _check_piece_types(names_) -> tuple[list[str], list[bool], list[bool], int, str]:
@@ -461,10 +466,10 @@ def ipl_automatic_bonds(
         grps_: list[str] = [ABBREVIATION_TO_GROUP.get(name,
                                                       'chain' if _is_chain
                                                       else None) for name, _is_chain in zip(names_, is_chain_)]
-        assert grps_.count('core lipids') == 1, \
+        assert sum(grp in CORE_GROUPS for grp in grps_) == 1, \
             f'automatic bonding only works with exactly one core unit but got {dict(zip(names_, grps_))}'
 
-        is_core_: list[bool] = [grp == 'core lipids' for grp in grps_]
+        is_core_: list[bool] = [grp in CORE_GROUPS for grp in grps_]
         # assert sum(is_core_) == 1, f'need exactly one core but none of {names_} is'
         core_: str = names[is_core_.index(True)]  # always need core, so we can assign it here
 
@@ -474,13 +479,13 @@ def ipl_automatic_bonds(
 
         assert (n_chains_ := sum(is_chain_)) <= 2, \
             'automatic bonding only works with at most two chains'
-        assert grps_.count('head groups') + grps_.count('functional groups') <= 1, \
-            'automatic bonding only works with at most one functional or head group unit'
+        assert grps_.count('head groups') + grps_.count('functional groups') <= 2, \
+            'automatic bonding only works with at most two functional or head group units'
 
         return grps_, is_chain_, is_core_, n_chains_, core_
 
     def _split_chains(chain_: str) -> tuple[str, str]:
-        logging.info('splitting chain:', chain_)
+        logging.info(f'splitting chain: {chain_}')
         l, db = _parse_chain_str(chain_)
         l1, l2 = l // 2, ceil(l, 2)
         db1, db2 = db // 2, ceil(db, 2)
@@ -489,7 +494,7 @@ def ipl_automatic_bonds(
         assert db1 + db2 == db
         chain1_ = f'C{l1}:{db1}'
         chain2_ = f'C{l2}:{db2}'
-        logging.info('new chains:', chain1_, chain2_)
+        logging.info(f'new chains: {chain1_}, {chain2_}')
         return chain1_, chain2_
 
     def _clean_chains(chains_: list[tuple[int, int]], sort_chains: bool) -> list[str]:
@@ -553,14 +558,18 @@ def ipl_automatic_bonds(
         bond_pairs_: list[tuple[int, int]] = []
         # print(grps)
         for mol_idx, (group, is_empty) in enumerate(zip(grps, is_empty_chain_placeholder)):
-            if group == 'core lipids':
+            if group in CORE_GROUPS:
                 continue
             elif group in ('head groups', 'functional groups'):
                 mask_fr_head = (placeholder_mol == mol_idx) & (placeholder_symbols == 'Fr')
                 idx_fr_head: int = int(placeholder_indices[mask_fr_head][0])
 
-                mask_fr_core = (placeholder_group == 'core lipids') & (placeholder_symbols == 'Fr')
+                # each head group takes the next free attachment point of the core
+                mask_fr_core = np.isin(placeholder_group, CORE_GROUPS) & (placeholder_symbols == 'Fr') \
+                    & (~placeholder_taken)
+                assert mask_fr_core.any(), f'core {core} has no free attachment point left for {names[mol_idx]}'
                 idx_fr_core: int = int(placeholder_indices[mask_fr_core][0])
+                placeholder_taken[np.argwhere(mask_fr_core)[0, 0]] = True
 
                 bond_pairs_.append((idx_fr_head, idx_fr_core))
             elif group == 'chain':
@@ -568,7 +577,7 @@ def ipl_automatic_bonds(
                 idx_chain: int = int(placeholder_indices[mask_chain][0])
 
                 mask_core = (
-                        (placeholder_group == 'core lipids')
+                        np.isin(placeholder_group, CORE_GROUPS)
                         & (~placeholder_taken)
                         & ((placeholder_symbols == 'Cs') | (placeholder_symbols == 'Rb'))
                 )
@@ -586,8 +595,8 @@ def ipl_automatic_bonds(
     # ensure list and make copy
     names: list[str] = list(names)
 
-    assert len(names) <= 4, \
-        'can automatically bond 1 core, at most two chains, at most one functional or head group'
+    assert len(names) <= 5, \
+        'can automatically bond 1 core, at most two chains, at most two functional or head groups'
 
     grps, is_chain, is_core, n_chains, core = _check_piece_types(names)
     # print(dict(zip(names, grps)), dict(zip(names, is_chain)))
@@ -599,7 +608,8 @@ def ipl_automatic_bonds(
         names.remove(chain)
         names.extend([chain1, chain2])
         # call again with split chains
-        return ipl_automatic_bonds(names, split_chain=False, plts=plts)
+        return ipl_automatic_bonds(names, split_chain=False, sort_chains=sort_chains,
+                                   remove_double_oxygen=remove_double_oxygen, plts=plts, core_chains=core_chains)
 
     # core chain correction: some core pieces contain parts of the chain
     chains_parsed: list[tuple[int, int]] = [
@@ -642,6 +652,11 @@ def ipl_automatic_bonds(
     mol = remove_placeholder_atoms(mol)
     if remove_double_oxygen:
         mol = replace_OOP_with_OP(mol)
+
+    if core_chains:
+        mol = modify_isoprenoid_chains(mol, core_chains, in_units=core in CHAINS_IN_ISOPRENE_UNITS)
+    # atom map numbers only mark the isoprenoid chains in the pieces
+    mol = clear_chain_marks(mol)
 
     formula = rdMolDescriptors.CalcMolFormula(mol)
     logger.info(f'successfully build molecule with formula {formula}')

@@ -101,8 +101,9 @@ def get_ks_solution(
             idx = elements.index(el)
             row[1 + idx] = EL_TO_DBE[el]
         rows_in_A.append(row)
-        lower_bounds.append(dbe_range[0])
-        upper_bounds.append(dbe_range[1])
+        # DBE = 1 + sum(dbe_i * x_i)
+        lower_bounds.append(dbe_range[0] - 1)
+        upper_bounds.append(dbe_range[1] - 1)
 
     if check_lewis:
         assert elements is not None
@@ -138,11 +139,12 @@ def get_ks_solution(
         lower_bounds.append(2 * v_max)
         upper_bounds.append(float("inf"))
         # third condition: connecting n atoms requires at least n - 1 bonds
+        # V >= 2 * (n - 1) <==> sum (v_i - 2) x_i >= -2
         row = [0] * n_variables
         for idx, el in enumerate(elements):
             row[1 + idx] = SENIOR_VALENCES[el] - 2
         rows_in_A.append(row)
-        lower_bounds.append(-1)
+        lower_bounds.append(-2)
         upper_bounds.append(float('inf'))
 
     if add_multi_el_constraint_for is not None:
@@ -250,13 +252,25 @@ def get_ks_solution(
 
     )
 
-    return milp(
+    res = milp(
         c=c,
         integrality=integrality,
         bounds=bounds,
         constraints=constraints,
         options=dict(disp=False)
     )
+    if res.status == 4:
+        # HiGHS presolve occasionally fails on this badly scaled problem (depends on the
+        # exact tolerance value), solving without presolve is more robust
+        logger.debug(f'milp failed ({res.message}), retrying without presolve')
+        res = milp(
+            c=c,
+            integrality=integrality,
+            bounds=bounds,
+            constraints=constraints,
+            options=dict(disp=False, presolve=False)
+        )
+    return res
 
 
 def milp_result_to_cd(coeffs: np.ndarray[float], element_names: list[str]):
@@ -305,6 +319,8 @@ def get_common_element_bounds(
         'S': (0, 2),
     }
     for el, (l, u) in ranges.items():
+        if el not in elements:
+            continue
         # attempt to restrict the ranges
         el_idx = elements.index(el)
         if lower[el_idx] < l:
@@ -354,7 +370,7 @@ def find_k_top_solutions(
         elif res.status != 0:
             logger.warning(f"There is a problem with milp after {len(sols)} solutions: {res.message}")
             return sols, reses
-        sols.append([round(v) for v in res.x[1:len(ATOMIC_MASSES) + 1]])
+        sols.append([round(v) for v in res.x[1:len(element_masses) + 1]])
         reses.append(res)
     return sols, reses
 
@@ -365,15 +381,21 @@ def get_formulas_default_constraints(
         mass_tolerance_Da: float = None,
         elements: list[str] = None,
         n_formulas_max=10,
+        dbe_range: tuple[float, float] = (0, 36),
+        exclusive_elements: str | list[str] = 'NPS',
         **kwargs
 ):
+    """exclusive_elements: at most one of those elements may be present in a formula"""
     if elements is None:
         elements = ELEMENTS.copy()
     atomic_masses = [CompoundDict(el).mass for el in elements]
 
     lower, upper = get_common_element_bounds(M_obs, elements)
-    ratio_constraints = get_min_max_ratios_extended()
-    min_ratios, max_ratios = encode_ratio_constraints(ratio_constraints[0], ratio_constraints[1], elements)
+    min_ratios, max_ratios = get_min_max_ratios_extended()
+    # only keep ratios for which both elements are in the element list
+    min_ratios = {k: v for k, v in min_ratios.items() if set(k) <= set(elements)}
+    max_ratios = {k: v for k, v in max_ratios.items() if set(k) <= set(elements)}
+    min_ratios, max_ratios = encode_ratio_constraints(min_ratios, max_ratios, elements)
 
     sols, res = find_k_top_solutions(
         M_obs,
@@ -385,9 +407,9 @@ def get_formulas_default_constraints(
         mass_tolerance_Da=mass_tolerance_Da,
         mass_tolerance_ppm=mass_tolerance_ppm,
         k=n_formulas_max,
-        add_multi_el_constraint_for=[elements.index(el) for el in 'NPS'],
+        add_multi_el_constraint_for=[elements.index(el) for el in exclusive_elements if el in elements] or None,
         elements=elements,
-        dbe_range=(0, 36),
+        dbe_range=dbe_range,
         **kwargs
     )
     compounds = [milp_result_to_cd(sol, elements) for sol in sols]
