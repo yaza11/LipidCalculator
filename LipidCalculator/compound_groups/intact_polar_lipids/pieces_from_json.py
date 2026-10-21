@@ -20,9 +20,9 @@ PLACEHOLDER_ELEMENTS: list[str] = ['Fr', 'Cs', 'Rb']
 
 # C atoms beyond placeholders have to be included in chain
 CORE_IMPLICIT_CHAIN: dict[tuple[str, str], tuple[int, int]] = {
-    ('DGTS', 'Rb'): (4, 0),
+    ('DGTS', 'Rb'): (1, 0),
     ('DGTS', 'Cs'): (1, 0),
-    ('BL', 'Rb'): (4, 0),
+    ('BL', 'Rb'): (1, 0),
     ('BL', 'Cs'): (1, 0),
     ('OL', 'Cs'): (4, 0),
     ('OL', 'Rb'): (1, 0),
@@ -32,6 +32,8 @@ CORE_IMPLICIT_CHAIN: dict[tuple[str, str], tuple[int, int]] = {
     ('DEG', 'Rb'): (1, 0),
     ('CER', 'Cs'): (1, 0),
     ('CER', 'Rb'): (5, 1),
+    ('DHCER', 'Cs'): (1, 0),
+    ('DHCER', 'Rb'): (5, 0),
     ('AEG', 'Cs'): (1, 0),
     ('AEG', 'Rb'): (1, 0)
 }
@@ -53,6 +55,13 @@ for name_type, members in IPL_PIECES.items():
 DATA_FRAME_IPL_PIECES = pd.DataFrame(_entries)
 
 ABBREVIATION_TO_GROUP: dict[str, str] = dict(zip(ABBREVIATIONS, GROUPS))
+
+# groups whose members can serve as the core of a molecule (exactly one per molecule)
+CORE_GROUPS: list[str] = ['core lipids', 'quinones', 'carotenoids']
+# cores for which isoprenoid chains are specified in isoprene units instead of carbon atoms (e.g. MK(7:7))
+CHAINS_IN_ISOPRENE_UNITS: set[str] = {
+    e['abbreviation'] for e in _entries if e.get('chain_notation') == 'isoprene units'
+}
 
 
 def get_entry_by_abbreviation(name: str) -> pd.Series:

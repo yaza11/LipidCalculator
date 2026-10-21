@@ -60,7 +60,7 @@ from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import
     get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES, CORE_GROUPS, \
     CHAINS_IN_ISOPRENE_UNITS
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_chains import modify_isoprenoid_chains, \
-    clear_chain_marks
+    clear_chain_marks, add_tetraether_double_bonds
 
 from LipidCalculator.rdkit.plotting import mplt_mol, plt_indices_bond
 from LipidCalculator.rdkit.util import add_indices, mol_from_str, get_combined
@@ -72,6 +72,8 @@ IPythonConsole.molSize = 500, 500
 IPythonConsole.ipython_useSVG = True
 
 CHAIN_EMPTY_PLACEHOLDER = 'C0:0'
+# atom property marking the attachment point of an empty chain (C0:0) in the core
+EMPTY_CHAIN_PROP = 'empty_chain'
 
 
 def ceil(a, b):
@@ -216,6 +218,33 @@ def _get_chain_smiles(chain_length: int, double_bonds: int) -> str:
             chain += '='
 
     return chain
+
+
+def _remove_empty_chain_atoms(mol: Mol, core: str) -> Mol:
+    """For empty chains (C0:0, e.g. lyso lipids), also remove the chain carbon contained in the core (e.g. the
+    carbonyl carbon of an acyl chain), so that the core keeps an OH (or NH2) instead of a formyl group"""
+    marked = [a for a in mol.GetAtoms() if a.HasProp(EMPTY_CHAIN_PROP)]
+    if not marked:
+        return mol
+    rw = Chem.RWMol(mol)
+    to_remove: set[int] = set()
+    for placeholder in marked:
+        n_carbons = CORE_IMPLICIT_CHAIN.get((core, placeholder.GetSymbol()), (0, 0))[0]
+        if n_carbons == 0:
+            continue
+        assert n_carbons == 1, f'chain at {placeholder.GetSymbol()} of core {core} cannot be empty'
+        carbon = placeholder.GetNeighbors()[0]
+        to_remove.add(carbon.GetIdx())
+        for bond in carbon.GetBonds():
+            other = bond.GetOtherAtom(carbon)
+            if other.GetSymbol() == 'O' and bond.GetBondType() == Chem.BondType.DOUBLE:
+                to_remove.add(other.GetIdx())
+            elif other.GetIdx() != placeholder.GetIdx():
+                # gets an H instead of the chain
+                rw.GetAtomWithIdx(other.GetIdx()).SetNoImplicit(False)
+    for idx in sorted(to_remove, reverse=True):
+        rw.RemoveAtom(idx)
+    return rw.GetMol()
 
 
 def remove_placeholder_atoms(
@@ -448,7 +477,8 @@ def ipl_automatic_bonds(
         remove_double_oxygen: bool = True,
         plts=False,
         idx_plt: bool = False,
-        core_chains: str | None = None
+        core_chains: str | None = None,
+        core_double_bonds: int | None = None
 ) -> Mol:
     """
     Attempt to form bonds between pieces automatically by idenitfying piece types and placeholders.
@@ -457,8 +487,8 @@ def ipl_automatic_bonds(
     consider molecules that connect the OH group of the glycerol directly to P instead of having a O-O-P fragment.
 
     cores with two attachment points (e.g. GDGTs) can take two head groups, the first one is bonded to the
-    first attachment point. core_chains sets the isoprenoid chains of the core, e.g. '20:1_25:0' for archaeols
-    (see isoprenoid_chains.py).
+    first attachment point. core_chains sets the isoprenoid chains of the core, e.g. '20:1_25:0' for archaeols,
+    core_double_bonds the number of double bonds in the biphytanyl chains of tetraethers (see isoprenoid_chains.py).
     """
 
     def _check_piece_types(names_) -> tuple[list[str], list[bool], list[bool], int, str]:
@@ -534,7 +564,9 @@ def ipl_automatic_bonds(
         placeholder_mol: list[int] = []
         placeholder_group: list[str] = []
         atom_count: int = 0
+        offsets: list[int] = []
         for mol_idx, (grp, piece) in enumerate(zip(piece_groups, pieces)):
+            offsets.append(atom_count)
             for atom in piece.GetAtoms():
                 if (s := atom.GetSymbol()) in PLACEHOLDER_ELEMENTS:
                     placeholder_indices.append(atom_count)
@@ -586,6 +618,10 @@ def ipl_automatic_bonds(
 
                 if not is_empty:
                     bond_pairs_.append((idx_chain, idx_core))
+                else:
+                    # chain carbons of the core are removed later
+                    core_mol = int(placeholder_mol[np.argwhere(mask_core)[0, 0]])
+                    pieces[core_mol].GetAtomWithIdx(idx_core - offsets[core_mol]).SetBoolProp(EMPTY_CHAIN_PROP, True)
             else:
                 raise ValueError(f'group {group} not recognized')
 
@@ -609,7 +645,8 @@ def ipl_automatic_bonds(
         names.extend([chain1, chain2])
         # call again with split chains
         return ipl_automatic_bonds(names, split_chain=False, sort_chains=sort_chains,
-                                   remove_double_oxygen=remove_double_oxygen, plts=plts, core_chains=core_chains)
+                                   remove_double_oxygen=remove_double_oxygen, plts=plts, core_chains=core_chains,
+                                   core_double_bonds=core_double_bonds)
 
     # core chain correction: some core pieces contain parts of the chain
     chains_parsed: list[tuple[int, int]] = [
@@ -621,7 +658,7 @@ def ipl_automatic_bonds(
 
     # check that number of chains is compatible with core
     if any(is_chain):
-        if core in ('DGTS', 'BL', 'OL'):
+        if core in ('OL',):
             assert sum(is_chain) <= 1, f'can have only 1 chain for core {core}, got {names}'
         else:
             assert sum(is_chain) <= 2, \
@@ -649,12 +686,15 @@ def ipl_automatic_bonds(
 
     # supress warnings for placeholders
     mol = _combine_molecules_at_positions(mols, bond_positions=bond_pairs)
+    mol = _remove_empty_chain_atoms(mol, core)
     mol = remove_placeholder_atoms(mol)
     if remove_double_oxygen:
         mol = replace_OOP_with_OP(mol)
 
     if core_chains:
         mol = modify_isoprenoid_chains(mol, core_chains, in_units=core in CHAINS_IN_ISOPRENE_UNITS)
+    if core_double_bonds:
+        mol = add_tetraether_double_bonds(mol, core_double_bonds)
     # atom map numbers only mark the isoprenoid chains in the pieces
     mol = clear_chain_marks(mol)
 
