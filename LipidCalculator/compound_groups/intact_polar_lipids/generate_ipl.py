@@ -42,6 +42,7 @@ CONVENTIONS for IPL naming
 - C atoms in the core contribute to the chain lengths and double bonds
 
 """
+import re
 import warnings
 from typing import Iterable
 
@@ -58,7 +59,7 @@ from rdkit.Chem.Draw import IPythonConsole
 
 from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import PLACEHOLDER_ELEMENTS, \
     get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES, CORE_GROUPS, \
-    CHAINS_IN_ISOPRENE_UNITS
+    CHAINS_IN_ISOPRENE_UNITS, CHAIN_PLACEHOLDERS, implicit_chain
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_chains import modify_isoprenoid_chains, \
     clear_chain_marks, add_tetraether_double_bonds
 
@@ -72,8 +73,11 @@ IPythonConsole.molSize = 500, 500
 IPythonConsole.ipython_useSVG = True
 
 CHAIN_EMPTY_PLACEHOLDER = 'C0:0'
-# atom property marking the attachment point of an empty chain (C0:0) in the core
+# chains are given as e.g. C16:0, C18:1;(2OH) (hydroxyl group at C2), C24:0;O (one OH, first free position from C2)
+CHAIN_RE = re.compile(r'C(\d+):(\d+)((?:;[^;]+)*)')
+# atom property marking the attachment point of an empty chain (C0:0), value: carbons of the chain in the piece
 EMPTY_CHAIN_PROP = 'empty_chain'
+EMPTY_CHAIN_STRICT_PROP = 'empty_chain_strict'
 
 
 def ceil(a, b):
@@ -201,38 +205,76 @@ def _combine_molecules_at_positions(
     return _combo
 
 
-def _get_chain_smiles(chain_length: int, double_bonds: int) -> str:
+def _get_chain_smiles(chain_length: int, double_bonds: int, hydroxy: Iterable[int] = ()) -> str:
     """
     Generate the smiles for a chain of a certain length with a certain number of double bonds. Spaces double bonds
-    equally along the chain. Cs is used as a placeholder"""
+    equally along the chain. Cs is used as a placeholder. hydroxy are the indices of chain atoms (starting at 0
+    for the atom bonded to the placeholder) with an OH group."""
     assert chain_length >= double_bonds, \
         f"Cannot fit {double_bonds} in chain of length {chain_length}"
     positions_double_bonds = np.linspace(0, chain_length, double_bonds + 2)[1:-1]
     idcs_double_bonds = np.round(positions_double_bonds).astype(int) - 1
+    hydroxy = set(hydroxy)
+    assert all(0 <= i < chain_length for i in hydroxy), f'hydroxyl groups {hydroxy} outside of chain'
 
     chain = '[Cs]'
 
     for i in range(chain_length):
         chain += 'C'
+        if i in hydroxy:
+            chain += '(O)'
         if i in idcs_double_bonds:
             chain += '='
 
     return chain
 
 
-def _remove_empty_chain_atoms(mol: Mol, core: str) -> Mol:
-    """For empty chains (C0:0, e.g. lyso lipids), also remove the chain carbon contained in the core (e.g. the
-    carbonyl carbon of an acyl chain), so that the core keeps an OH (or NH2) instead of a formyl group"""
+def _parse_chain(chain: str) -> tuple[int, int, str]:
+    """E.g., 'C18:1;(2OH)' --> (18, 1, ';(2OH)')"""
+    match = CHAIN_RE.fullmatch(chain)
+    assert match is not None, f'{chain} is not a valid chain (e.g. C18:1, C16:0;(2OH), C24:0;O)'
+    return int(match.group(1)), int(match.group(2)), match.group(3)
+
+
+def _hydroxy_indices(modifications: str, chain_length: int, double_bonds: int, n_core_carbons: int) -> list[int]:
+    """Chain atom indices of the hydroxyl groups, the numbering of the modifications includes the carbon atoms of
+    the core (C2 of an acyl chain is the first atom of the chain if the core contains the carbonyl carbon)"""
+    positions: list[int] = []
+    n_unspecified = 0
+    for part in modifications.split(';')[1:]:
+        if m := re.fullmatch(r'\((\d+)OH\)', part):
+            positions.append(int(m.group(1)))
+        elif m := re.fullmatch(r'(\d*)O', part):
+            n_unspecified += int(m.group(1) or 1)
+        else:
+            raise ValueError(f'unknown chain modification {part}')
+    indices = [pos - 1 - n_core_carbons for pos in positions]
+    # unspecified hydroxyl groups at the first free carbon atoms (from C2), avoiding double bonds
+    db = set(np.round(np.linspace(0, chain_length, double_bonds + 2)[1:-1]).astype(int) - 1)
+    candidates = [i for i in range(max(1 - n_core_carbons, 0), chain_length)
+                  if i not in indices and i not in db and i - 1 not in db]
+    assert len(candidates) >= n_unspecified, f'chain too short for {n_unspecified} hydroxyl groups'
+    return indices + candidates[:n_unspecified]
+
+
+def _remove_empty_chain_atoms(mol: Mol) -> Mol:
+    """For empty chains (C0:0, e.g. lyso lipids, or attachment points without chain), also remove the chain carbon
+    contained in the piece (e.g. the carbonyl carbon of an acyl chain), so that it keeps an OH (or NH2) instead of a
+    formyl group"""
     marked = [a for a in mol.GetAtoms() if a.HasProp(EMPTY_CHAIN_PROP)]
     if not marked:
         return mol
     rw = Chem.RWMol(mol)
     to_remove: set[int] = set()
     for placeholder in marked:
-        n_carbons = CORE_IMPLICIT_CHAIN.get((core, placeholder.GetSymbol()), (0, 0))[0]
+        n_carbons = placeholder.GetIntProp(EMPTY_CHAIN_PROP)
         if n_carbons == 0:
             continue
-        assert n_carbons == 1, f'chain at {placeholder.GetSymbol()} of core {core} cannot be empty'
+        if n_carbons > 1:
+            # explicitly requested empty chains must be removable, otherwise only the placeholder is removed
+            assert not placeholder.GetBoolProp(EMPTY_CHAIN_STRICT_PROP), \
+                f'the chain at {placeholder.GetSymbol()} cannot be empty, the piece contains {n_carbons} of its carbons'
+            continue
         carbon = placeholder.GetNeighbors()[0]
         to_remove.add(carbon.GetIdx())
         for bond in carbon.GetBonds():
@@ -379,15 +421,12 @@ def connect_ipl_pieces(
 
 
 def _parse_chain_str(chain: str | tuple[int, int]) -> tuple[int, int]:
-    """E.g., 'C30:2' --> (30, 2)"""
+    """E.g., 'C30:2' --> (30, 2), modifications of the chain are ignored"""
     if not isinstance(chain, str):
         assert len(chain) == 2
         return chain
-
-    hain = chain[1:]
-    assert len(hain.split(':')) == 2
-    l, db = hain.split(':')
-    return int(l), int(db)
+    l, db, _ = _parse_chain(chain)
+    return l, db
 
 
 def get_struct(inpt: str | tuple[int, int]) -> str | None:
@@ -395,9 +434,9 @@ def get_struct(inpt: str | tuple[int, int]) -> str | None:
     if not isinstance(inpt, str):
         assert len(inpt) == 2
         return _get_chain_smiles(*inpt)
-    if inpt.startswith('C') and ':' in inpt:
-        l, db = _parse_chain_str(inpt)
-        return _get_chain_smiles(l, db)
+    if CHAIN_RE.fullmatch(inpt):
+        l, db, modifications = _parse_chain(inpt)
+        return _get_chain_smiles(l, db, _hydroxy_indices(modifications, l, db, 0))
     elif inpt not in ABBREVIATIONS:
         warnings.warn(f'structure with name {inpt} not found, returning None')
         return None
@@ -454,27 +493,18 @@ def correct_chain_length_for_core(
     return lc, dbc
 
 
-def replace_OOP_with_OP(mol):
-    rw_mol = Chem.RWMol(mol)  #
-
-    # Find O–O–P (there can be several, e.g. for tetraethers with two head groups)
-    while match := rw_mol.GetSubstructMatch(Chem.MolFromSmarts("[O]-[O]-[P]")):
-        o1_idx, o2_idx, p_idx = match  # first O, middle O, P
-
-        # Delete the middle oxygen
-        rw_mol.AddBond(o1_idx, p_idx, Chem.BondType.SINGLE)
-
-        rw_mol.RemoveAtom(o2_idx)
-
-    Chem.SanitizeMol(rw_mol)
-    return rw_mol.GetMol()
+def _assert_no_peroxide(mol: Mol, names: list[str]) -> None:
+    """The core provides the O at its attachment points, head groups bond with their own atom (e.g. P or the anomeric
+    C), so O-O bonds point to a piece that does not follow this convention"""
+    if mol.HasSubstructMatch(Chem.MolFromSmarts('[O]-[O]')):
+        raise ValueError(f'combining {names} gives an O-O bond, head groups must not contain the O they are bonded '
+                         f'through (the core provides it)')
 
 
 def ipl_automatic_bonds(
         names: Iterable[str],
         split_chain: bool = True,
         sort_chains: bool = True,
-        remove_double_oxygen: bool = True,
         plts=False,
         idx_plt: bool = False,
         core_chains: str | None = None,
@@ -483,8 +513,10 @@ def ipl_automatic_bonds(
     """
     Attempt to form bonds between pieces automatically by idenitfying piece types and placeholders.
 
-    for head groups that contain a phospahte group and are connected to a glycerol backbone, it is convention to
-    consider molecules that connect the OH group of the glycerol directly to P instead of having a O-O-P fragment.
+    the core provides the O at its attachment points (Fr), head groups bond to it with their own atom (e.g. P of
+    phospholipids or the anomeric C of sugars). Chains are attached to the chain placeholders (Cs, Rb) of the core,
+    then of the head groups, the carbons of a chain that are contained in a piece (connected to its placeholder
+    through C-C bonds, e.g. the carbonyl carbon of acyl chains) count to the chain length.
 
     cores with two attachment points (e.g. GDGTs) can take two head groups, the first one is bonded to the
     first attachment point. core_chains sets the isoprenoid chains of the core, e.g. '20:1_25:0' for archaeols,
@@ -492,7 +524,7 @@ def ipl_automatic_bonds(
     """
 
     def _check_piece_types(names_) -> tuple[list[str], list[bool], list[bool], int, str]:
-        is_chain_: list[bool] = [(name.startswith('C') and ':' in name) for name in names_]
+        is_chain_: list[bool] = [CHAIN_RE.fullmatch(name) is not None for name in names_]
         grps_: list[str] = [ABBREVIATION_TO_GROUP.get(name,
                                                       'chain' if _is_chain
                                                       else None) for name, _is_chain in zip(names_, is_chain_)]
@@ -500,23 +532,20 @@ def ipl_automatic_bonds(
             f'automatic bonding only works with exactly one core unit but got {dict(zip(names_, grps_))}'
 
         is_core_: list[bool] = [grp in CORE_GROUPS for grp in grps_]
-        # assert sum(is_core_) == 1, f'need exactly one core but none of {names_} is'
         core_: str = names[is_core_.index(True)]  # always need core, so we can assign it here
 
         assert None not in grps_, \
             (f'cannot use name(s) {[names_[idx] for idx, grp in enumerate(grps_) if grp is None]} '
              f'because the are not associated with a group')
-
-        assert (n_chains_ := sum(is_chain_)) <= 2, \
-            'automatic bonding only works with at most two chains'
         assert grps_.count('head groups') + grps_.count('functional groups') <= 2, \
             'automatic bonding only works with at most two functional or head group units'
 
-        return grps_, is_chain_, is_core_, n_chains_, core_
+        return grps_, is_chain_, is_core_, sum(is_chain_), core_
 
     def _split_chains(chain_: str) -> tuple[str, str]:
         logging.info(f'splitting chain: {chain_}')
-        l, db = _parse_chain_str(chain_)
+        l, db, modifications = _parse_chain(chain_)
+        assert not modifications, f'cannot split chain with modifications {chain_}'
         l1, l2 = l // 2, ceil(l, 2)
         db1, db2 = db // 2, ceil(db, 2)
 
@@ -527,154 +556,76 @@ def ipl_automatic_bonds(
         logging.info(f'new chains: {chain1_}, {chain2_}')
         return chain1_, chain2_
 
-    def _clean_chains(chains_: list[tuple[int, int]], sort_chains: bool) -> list[str]:
-        if len(chains_) == 0:
-            return []
-        """Could be 0, 1 or 2 chains"""
-        # make sure longest chain comes first
-        if sort_chains and (n_chains > 1) and (chains_[1][0] > chains_[0][0]):
-            chains_.reverse()
-        _corrections: list[tuple[int, int]] = [
-            CORE_IMPLICIT_CHAIN[(core, 'Rb')], CORE_IMPLICIT_CHAIN[(core, 'Cs')]
-        ]
-        logging.info(f'correcting {chains_=} for {core=} with {_corrections=}')
-        if (n_chains > 1) and (_corrections[1][0] > _corrections[0][0]):
-            _corrections.reverse()
-        # combine bigger correction with bigger chain
-        # if placeholder is used "(0,0)", stay at 0,0
-        chains_new_: list[str] = [
-            f'C{_chain[0] - _correction[0]}:{_chain[1] - _correction[1]}'
-            if _chain != (0, 0) else CHAIN_EMPTY_PLACEHOLDER
-            for _chain, _correction in zip(chains_, _corrections)
-        ]
-
-        logging.info(f'chains after correction: {chains_new_}')
-        return chains_new_
-
-    def _find_bonds_placeholders(piece_groups: list[str], pieces: list[Mol], is_empty_chain_placeholder: list[bool]):
-        # need to know indices of placeholders
-        # indices of atoms in subsequent molecules are shifted by number of atoms
-        # in preceding molecules
-        # match Cs, Rb to Cs of chains and Fr to Fr
-        # connections = [{'Cs', 'Cs'}, {'Cs', 'Rb'}, {'Fr', 'Fr'}]
-
-        # gather placeholder indicies
-        placeholder_indices: list[int] = []
-        placeholder_symbols: list[str] = []
-        placeholder_mol: list[int] = []
-        placeholder_group: list[str] = []
-        atom_count: int = 0
-        offsets: list[int] = []
-        for mol_idx, (grp, piece) in enumerate(zip(piece_groups, pieces)):
-            offsets.append(atom_count)
-            for atom in piece.GetAtoms():
-                if (s := atom.GetSymbol()) in PLACEHOLDER_ELEMENTS:
-                    placeholder_indices.append(atom_count)
-                    placeholder_symbols.append(s)
-                    placeholder_mol.append(mol_idx)
-                    placeholder_group.append(grp)
-                atom_count += 1
-
-        # pair non-core groups to core
-        placeholder_indices: np.ndarray[int] = np.array(placeholder_indices)
-        placeholder_symbols: np.ndarray[str] = np.array(placeholder_symbols)
-        placeholder_mol: np.ndarray[int] = np.array(placeholder_mol)
-        placeholder_group: np.ndarray[str] = np.array(placeholder_group)
-        placeholder_taken: np.ndarray[bool] = np.zeros_like(placeholder_indices, dtype=bool)
-
-        # print(placeholder_indices)
-        # print(placeholder_symbols)
-        # print(placeholder_mol)
-        # print(placeholder_group)
-
-        bond_pairs_: list[tuple[int, int]] = []
-        # print(grps)
-        for mol_idx, (group, is_empty) in enumerate(zip(grps, is_empty_chain_placeholder)):
-            if group in CORE_GROUPS:
-                continue
-            elif group in ('head groups', 'functional groups'):
-                mask_fr_head = (placeholder_mol == mol_idx) & (placeholder_symbols == 'Fr')
-                idx_fr_head: int = int(placeholder_indices[mask_fr_head][0])
-
-                # each head group takes the next free attachment point of the core
-                mask_fr_core = np.isin(placeholder_group, CORE_GROUPS) & (placeholder_symbols == 'Fr') \
-                    & (~placeholder_taken)
-                assert mask_fr_core.any(), f'core {core} has no free attachment point left for {names[mol_idx]}'
-                idx_fr_core: int = int(placeholder_indices[mask_fr_core][0])
-                placeholder_taken[np.argwhere(mask_fr_core)[0, 0]] = True
-
-                bond_pairs_.append((idx_fr_head, idx_fr_core))
-            elif group == 'chain':
-                mask_chain = (placeholder_mol == mol_idx) & (placeholder_symbols == 'Cs')
-                idx_chain: int = int(placeholder_indices[mask_chain][0])
-
-                mask_core = (
-                        np.isin(placeholder_group, CORE_GROUPS)
-                        & (~placeholder_taken)
-                        & ((placeholder_symbols == 'Cs') | (placeholder_symbols == 'Rb'))
-                )
-                idx_core = int(placeholder_indices[mask_core][0])
-                placeholder_taken[np.argwhere(mask_core)[0, 0]] = True
-
-                if not is_empty:
-                    bond_pairs_.append((idx_chain, idx_core))
-                else:
-                    # chain carbons of the core are removed later
-                    core_mol = int(placeholder_mol[np.argwhere(mask_core)[0, 0]])
-                    pieces[core_mol].GetAtomWithIdx(idx_core - offsets[core_mol]).SetBoolProp(EMPTY_CHAIN_PROP, True)
-            else:
-                raise ValueError(f'group {group} not recognized')
-
-            logging.info(f'determined bonds between {bond_pairs_}')
-        return bond_pairs_
-
     # ensure list and make copy
     names: list[str] = list(names)
 
-    assert len(names) <= 5, \
-        'can automatically bond 1 core, at most two chains, at most two functional or head groups'
-
     grps, is_chain, is_core, n_chains, core = _check_piece_types(names)
-    # print(dict(zip(names, grps)), dict(zip(names, is_chain)))
 
-    if split_chain and (n_chains == 1):  # splitting chain
+    # pieces (core and head groups) in the order of names, chains are added later
+    piece_names: list[str] = [name for name, _is_chain in zip(names, is_chain) if not _is_chain]
+    piece_groups: list[str] = [grp for grp, _is_chain in zip(grps, is_chain) if not _is_chain]
+    mols: list[Mol] = [mol_from_str(get_struct(name)) for name in piece_names]
+    core_piece: int = piece_groups.index(next(g for g in piece_groups if g in CORE_GROUPS))
+    head_pieces: list[int] = [i for i, g in enumerate(piece_groups) if g in ('head groups', 'functional groups')]
+
+    # attachment points of chains: core first, then head groups, in the order of the placeholders in the SMILES
+    targets: list[tuple[int, int, str]] = [
+        (i, atom.GetIdx(), atom.GetSymbol())
+        for i in [core_piece] + head_pieces
+        for atom in mols[i].GetAtoms() if atom.GetSymbol() in CHAIN_PLACEHOLDERS
+    ]
+
+    if split_chain and (n_chains == 1) and (len(targets) >= 2):  # splitting chain
         idx_chain = grps.index('chain')
         chain: str = names[idx_chain]
         chain1, chain2 = _split_chains(chain)
         names.remove(chain)
         names.extend([chain1, chain2])
         # call again with split chains
-        return ipl_automatic_bonds(names, split_chain=False, sort_chains=sort_chains,
-                                   remove_double_oxygen=remove_double_oxygen, plts=plts, core_chains=core_chains,
-                                   core_double_bonds=core_double_bonds)
+        return ipl_automatic_bonds(names, split_chain=False, sort_chains=sort_chains, plts=plts,
+                                   core_chains=core_chains, core_double_bonds=core_double_bonds)
 
-    # core chain correction: some core pieces contain parts of the chain
-    chains_parsed: list[tuple[int, int]] = [
-        _parse_chain_str(name)
-        for name, _is_chain in zip(names, is_chain)
-        if _is_chain
-    ]
-    chains: list[str] = _clean_chains(chains_parsed, sort_chains=sort_chains)
+    chains: list[tuple[int, int, str]] = [_parse_chain(name) for name, _is_chain in zip(names, is_chain) if _is_chain]
+    assert len(chains) <= len(targets), \
+        f'{"-".join(piece_names)} can take at most {len(targets)} chain(s), got {len(chains)}'
+    # some pieces contain parts of the chain (e.g. the carbonyl carbon), the chain lengths include those
+    corrections: list[tuple[int, int]] = [implicit_chain(mols[i], idx) for i, idx, _ in targets]
+    # chains with modifications are given at their positions and are not sorted
+    if sort_chains and (n_chains == 2) and (targets[0][0] == targets[1][0] == core_piece) \
+            and not any(modifications for _, _, modifications in chains):
+        # longest chain first, combined with the bigger correction
+        if chains[1][0] > chains[0][0]:
+            chains.reverse()
+        if corrections[1][0] > corrections[0][0]:
+            targets[:2], corrections[:2] = targets[1::-1], corrections[1::-1]
+    logging.info(f'chains {chains} at {targets} with corrections {corrections}')
 
-    # check that number of chains is compatible with core
-    if any(is_chain):
-        if core in ('OL',):
-            assert sum(is_chain) <= 1, f'can have only 1 chain for core {core}, got {names}'
-        else:
-            assert sum(is_chain) <= 2, \
-                'can only do chain length correction for two chains, split first'
+    def _global(piece: int, idx: int) -> int:
+        return sum(m.GetNumAtoms() for m in mols[:piece]) + idx
 
-    # insert into names
-    names_new = []
-    for name, _is_chain in zip(names, is_chain):
-        if _is_chain:
-            names_new.append(chains.pop(0))
-        else:
-            names_new.append(name)
-    names = names_new
-    is_chain_placeholder: list[bool] = [name == CHAIN_EMPTY_PLACEHOLDER for name in names]
+    # head groups take the free attachment points of the core in order
+    bond_pairs: list[tuple[int, int]] = []
+    core_attachments: list[int] = [a.GetIdx() for a in mols[core_piece].GetAtoms() if a.GetSymbol() == 'Fr']
+    for i in head_pieces:
+        assert core_attachments, f'core {core} has no free attachment point left for {piece_names[i]}'
+        head_attachment = next(a.GetIdx() for a in mols[i].GetAtoms() if a.GetSymbol() == 'Fr')
+        bond_pairs.append((_global(i, head_attachment), _global(core_piece, core_attachments.pop(0))))
 
-    mols: list[Mol] = [mol_from_str(get_struct(name)) for name in names]
+    # chains
+    for k, ((i, idx, _), (n_core_c, n_core_db)) in enumerate(zip(targets, corrections)):
+        if k >= len(chains) or chains[k][:2] == (0, 0):
+            # no chain: carbons of the chain in the piece are removed later
+            atom = mols[i].GetAtomWithIdx(idx)
+            atom.SetIntProp(EMPTY_CHAIN_PROP, n_core_c)
+            atom.SetBoolProp(EMPTY_CHAIN_STRICT_PROP, k < len(chains))
+            continue
+        l, db, modifications = chains[k]
+        lc, dbc = l - n_core_c, db - n_core_db
+        assert lc >= 0, f'chain C{l}:{db} is shorter than the {n_core_c} carbon atom(s) included in {piece_names[i]}'
+        assert dbc >= 0, f'chain C{l}:{db} has less double bonds than included in {piece_names[i]}'
+        mols.append(mol_from_str(_get_chain_smiles(lc, dbc, _hydroxy_indices(modifications, lc, dbc, n_core_c))))
+        chain_placeholder = next(a.GetIdx() for a in mols[-1].GetAtoms() if a.GetSymbol() == 'Cs')
+        bond_pairs.append((_global(len(mols) - 1, chain_placeholder), _global(i, idx)))
 
     if idx_plt:
         _mol = get_combined(mols)
@@ -682,14 +633,11 @@ def ipl_automatic_bonds(
         mplt_mol(_mol)
         plt.show()
 
-    bond_pairs = _find_bonds_placeholders(grps, mols, is_chain_placeholder)
-
     # supress warnings for placeholders
     mol = _combine_molecules_at_positions(mols, bond_positions=bond_pairs)
-    mol = _remove_empty_chain_atoms(mol, core)
+    mol = _remove_empty_chain_atoms(mol)
     mol = remove_placeholder_atoms(mol)
-    if remove_double_oxygen:
-        mol = replace_OOP_with_OP(mol)
+    _assert_no_peroxide(mol, names)
 
     if core_chains:
         mol = modify_isoprenoid_chains(mol, core_chains, in_units=core in CHAINS_IN_ISOPRENE_UNITS)

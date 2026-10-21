@@ -134,6 +134,117 @@ def adduct_combobox(parent: tk.Misc, var: tk.StringVar, include_neutral: bool = 
     return ttk.Combobox(parent, textvariable=var, values=values, width=width)
 
 
+class SearchCombobox(ttk.Combobox):
+    """
+    Combobox that can be searched by typing: the matching entries (starting with the text first, then containing it)
+    are shown in a list below the field while typing. Up/Down move in the list, Return or a click selects an entry,
+    Escape closes the list. Selecting an entry generates <<ComboboxSelected>> like the normal dropdown.
+    """
+    MAX_ROWS: int = 12
+
+    def __init__(self, master, values: Iterable[str], **kwargs):
+        kwargs.pop('state', None)
+        super().__init__(master, values=list(values), **kwargs)
+        self.all_values: list[str] = list(values)
+        self._popup: tk.Toplevel | None = None
+        self._listbox: tk.Listbox | None = None
+        self.bind('<KeyRelease>', self._on_key, add='+')
+        self.bind('<Down>', lambda _: self._move(1))
+        self.bind('<Up>', lambda _: self._move(-1))
+        self.bind('<Return>', self._on_return, add='+')
+        self.bind('<Escape>', lambda _: self._hide())
+        self.bind('<FocusOut>', lambda _: self.after(150, self._hide_if_unfocused), add='+')
+        self.bind('<<ComboboxSelected>>', lambda _: self._reset(), add='+')
+        self.bind('<Destroy>', lambda _: self._hide(), add='+')
+
+    def _matches(self) -> list[str]:
+        text = self.get().strip().lower()
+        if not text:
+            return list(self.all_values)
+        starts = [v for v in self.all_values if v.lower().startswith(text)]
+        contains = [v for v in self.all_values if text in v.lower() and v not in starts]
+        return starts + contains
+
+    def _on_key(self, event) -> None:
+        # only react to keys that change the text
+        if not (event.char and event.char.isprintable()) and event.keysym not in ('BackSpace', 'Delete'):
+            return
+        matches = self._matches()
+        self.configure(values=matches or self.all_values)
+        self._show(matches)
+
+    def _visible(self) -> bool:
+        return self._popup is not None and self._popup.winfo_exists()
+
+    def _show(self, matches: list[str]) -> None:
+        if not matches:
+            self._hide()
+            return
+        if not self._visible():
+            self._popup = tk.Toplevel(self)
+            self._popup.wm_overrideredirect(True)
+            self._popup.attributes('-topmost', True)
+            self._listbox = tk.Listbox(self._popup, exportselection=False, activestyle='none')
+            scrollbar = ttk.Scrollbar(self._popup, orient='vertical', command=self._listbox.yview)
+            self._listbox.configure(yscrollcommand=scrollbar.set)
+            self._listbox.pack(side='left', fill='both', expand=True)
+            scrollbar.pack(side='left', fill='y')
+            self._listbox.bind('<ButtonRelease-1>', lambda _: self._choose_current())
+            # close when the window is moved or resized
+            self.winfo_toplevel().bind('<Configure>', lambda _: self._hide(), add='+')
+        self._listbox.delete(0, 'end')
+        for value in matches:
+            self._listbox.insert('end', value)
+        self._listbox.configure(height=min(len(matches), self.MAX_ROWS))
+        self._listbox.selection_set(0)
+        self._popup.update_idletasks()
+        x, y = self.winfo_rootx(), self.winfo_rooty() + self.winfo_height()
+        self._popup.geometry(f'{self.winfo_width()}x{self._listbox.winfo_reqheight()}+{x}+{y}')
+
+    def _hide(self) -> None:
+        if self._visible():
+            self._popup.destroy()
+        self._popup, self._listbox = None, None
+
+    def _hide_if_unfocused(self) -> None:
+        if not self.winfo_exists():
+            return
+        # compare path names, focus_get fails for widgets created by Tk itself (e.g. the popdown of the dropdown)
+        focus = str(self.tk.call('focus'))
+        if focus not in (str(self), str(self._listbox)):
+            self._hide()
+
+    def _move(self, step: int):
+        if not self._visible():
+            return None  # normal behaviour, Down opens the dropdown
+        size = self._listbox.size()
+        current = self._listbox.curselection()
+        new = min(max((current[0] if current else -1) + step, 0), size - 1)
+        self._listbox.selection_clear(0, 'end')
+        self._listbox.selection_set(new)
+        self._listbox.see(new)
+        return 'break'
+
+    def _on_return(self, _) -> None:
+        if self._visible():
+            self._choose_current()
+
+    def _choose_current(self) -> None:
+        if not self._visible():
+            return
+        current = self._listbox.curselection()
+        if current:
+            self.set(self._listbox.get(current[0]))
+            self.icursor('end')
+            self.event_generate('<<ComboboxSelected>>')
+        self._hide()
+        self.focus_set()
+
+    def _reset(self) -> None:
+        self._hide()
+        self.configure(values=self.all_values)
+
+
 def send_buttons(parent: tk.Misc, send_targets: SendTargets | None, get_payload: Callable[[], dict | None]):
     """Add one button per send target, returns the frame containing them"""
     frame = ttk.Frame(parent)

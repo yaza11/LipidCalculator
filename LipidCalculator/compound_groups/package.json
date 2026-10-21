@@ -2,11 +2,6 @@
   "group": "Intact Polar Lipids",
   "functional groups": [
     {
-      "abbreviation": "OH",
-      "name": "hydroxy",
-      "SMILES": "[Fr]O[H]"
-    },
-    {
       "abbreviation": "P",
       "name": "phosphate",
       "SMILES": "O[P](O)([Fr])=O"
@@ -58,12 +53,12 @@
     {
       "abbreviation": "PS",
       "name": "Phosphatidylserine",
-      "SMILES": "NC(CO[P](O)(=O)O[Fr])C(=O)O"
+      "SMILES": "NC(CO[P](O)(=O)[Fr])C(=O)O"
     },
     {
       "abbreviation": "PE",
       "name": "Phosphatidylethanolamine",
-      "SMILES": "NCCO[P](O)(=O)O[Fr]"
+      "SMILES": "NCCO[P](O)(=O)[Fr]"
     },
     {
       "abbreviation": "PI",
@@ -73,7 +68,7 @@
     {
       "abbreviation": "DPG",
       "name": "Diphosphatidylglycerol",
-      "SMILES": "P(O[H])(O[Fr])(=O)OCC(O)COP([Fr])(=O)O[H]"
+      "SMILES": "P(O[H])([Fr])(=O)OCC(O)COP([Fr])(=O)O[H]"
     },
     {
       "abbreviation": "MMPE",
@@ -529,6 +524,42 @@
       "name": "Diacylglyceryl carboxyhydroxymethylcholine head",
       "SMILES": "[Fr]C(OCC[N+](C)(C)C)C([O-])=O",
       "notes": "structure as in DGCC entries of the MS-DIAL library (library_arch_mp1_msdial_jul.sqlite)"
+    },
+    {
+      "abbreviation": "Acyl",
+      "name": "fatty acyl ester",
+      "SMILES": "[Fr]C(=O)[Cs]",
+      "notes": "e.g. TG = Acyl-DAG, acyl sphingomyelin"
+    },
+    {
+      "abbreviation": "APG",
+      "name": "2-acyl-phosphatidylglycerol head",
+      "SMILES": "[Fr]P(O)(=O)OCC(CO)OC(=O)[Cs]",
+      "notes": "HBMP, BMP; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "AGluA",
+      "name": "2-O-acyl-glucuronic acid",
+      "SMILES": "[Fr]C1OC(C(=O)O)C(O)C(O)C1OC(=O)[Cs]",
+      "notes": "ADGGA; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "AHex",
+      "name": "2-O-acyl-hexose",
+      "SMILES": "C(O[H])1C(CO[H])OC([Fr])C(OC(=O)[Cs])C1O[H]",
+      "notes": "AHexCer; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "PGPA",
+      "name": "phosphatidylglycerophosphate head of cardiolipin",
+      "SMILES": "[Fr]P(O)(=O)OCC(O)COP(O)(=O)OCC(COC(=O)[Cs])OC(=O)[Cs]",
+      "notes": "CL = PGPA-DAG; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "GM3",
+      "name": "GM3 ganglioside head (sialyllactose)",
+      "SMILES": "[Fr]C1OC(CO)C(OC2OC(CO)C(O)C(OC3(C(=O)O)CC(O)C(NC(C)=O)C(C(O)C(O)CO)O3)C2O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: cut DHCER off GM3 14:0;2O/12:0"
     }
   ],
   "core lipids": [
@@ -546,7 +577,7 @@
     {
       "abbreviation": "OL",
       "name": "Ornithine lipid",
-      "SMILES": "N([H])([H])CCCC(C(O[H])=O)N([H])C(=O)CC(OC([Rb])=O)C[Cs]"
+      "SMILES": "N([H])([H])CCCC(C(O[H])=O)N([H])C(=O)CC(C[Cs])OC([Rb])=O"
     },
     {
       "abbreviation": "DAG",
@@ -569,12 +600,12 @@
     {
       "abbreviation": "CER",
       "name": "Ceramide",
-      "SMILES": "[Fr]OCC(C(O[H])/C=C/[Rb])N([H])C(=O)[Cs]"
+      "SMILES": "[Fr]OCC(C(O[Fr])/C=C/[Rb])N([H])C(=O)[Cs]"
     },
     {
       "abbreviation": "DHCER",
       "name": "Dihydroceramide (sphinganine based)",
-      "SMILES": "[Fr]OCC(C(O[H])CC[Rb])N([H])C(=O)[Cs]",
+      "SMILES": "[Fr]OCC(C(O[Fr])CC[Rb])N([H])C(=O)[Cs]",
       "notes": "like CER without the 4E double bond of sphingosine, verified with sphinganine based MS-DIAL entries"
     },
     {
@@ -585,7 +616,7 @@
     {
       "abbreviation": "GDGT0",
       "name": "Glycerol dialkyl glycerol tetraether",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1",
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1",
       "formula": "C86H172O6",
       "notes": "",
       "doi": "",
@@ -593,48 +624,48 @@
     },
     {
       "abbreviation": "OH-GDGT0",
-      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1",
+      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1",
       "formula": "C86H172O6"
     },
     {
       "abbreviation": "GDGT1",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1"
     },
     {
       "abbreviation": "OH-GDGT1",
-      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1"
+      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO1"
     },
     {
       "abbreviation": "GDGT2",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
     },
     {
       "abbreviation": "OH-GDGT2",
-      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC(C)CCCC(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
     },
     {
       "abbreviation": "GDGT3",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
     },
     {
       "abbreviation": "OH-GDGT3",
-      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO1)C2"
     },
     {
       "abbreviation": "GDGT4",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC3CCC(C3)C(C)CCCC(C)CCC(C)CCCC(C)C3CCC(CCCC(C)CCO1)C3)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC3CCC(C3)C(C)CCCC(C)CCC(C)CCCC(C)C3CCC(CCCC(C)CCO1)C3)C2"
     },
     {
       "abbreviation": "OH-GDGT4",
-      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC3CCC(C3)C(C)CCCC(C)CCC(C)CCCC(C)C3CCC(CCCC(C)CCO1)C3)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)(O)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC3CCC(C3)C(C)CCCC(C)CCC(C)CCCC(C)C3CCC(CCCC(C)CCO1)C3)C2"
     },
     {
       "abbreviation": "GDGT5",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO->[Fr])COCCC(C)CCCC3CCC(C3)C3CCCC(C)(CCC(C)CCCC(C)C4CCC(CCCC(C)CCO1)C4)C3)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOC(CO[Fr])COCCC(C)CCCC3CCC(C3)C3CCCC(C)(CCC(C)CCCC(C)C4CCC(CCCC(C)CCO1)C4)C3)C2"
     },
     {
       "abbreviation": "GDGT5'",
-      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOCC(CO->[Fr])OCCC(C)CCCC3CCC(C3)C3CCCC(C)(CCC(C)CCCC(C)C4CCC(CCCC(C)CCO1)C4)C3)C2"
+      "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOCC(CO[Fr])OCCC(C)CCCC3CCC(C3)C3CCCC(C)(CCC(C)CCCC(C)C4CCC(CCCC(C)CCO1)C4)C3)C2"
     },
     {
       "abbreviation": "AR",
@@ -1730,6 +1761,228 @@
       "name": "tetraglycosyl archaeol phosphatidic acid",
       "SMILES": "CC(C)CCCC(C)CCCC(C)CCCC(C)C[CH2:1]OC[C@H](COC1OC(COP(=O)(O)OC[C@@H](CO[CH2:3]CC(C)CCCC(C)CCCC(C)CCCC(C)C)O[CH2:4]CC(C)CCCC(C)CCCC(C)CCCC(C)C)C(O)C(O)C1OC1OC(COC2OC(COC3OC(CO)C(O)C(O)C3O)C(O)C(O)C2O)C(O)C(O)C1O)O[CH2:2]CC(C)CCCC(C)CCCC(C)CCCC(C)C",
       "notes": "derived from library_arch_mp1_msdial_jul.sqlite: TeGD-PA(20:0_20:0_20:0_20:0), isoprenoid chains are marked in the order of the database names"
+    },
+    {
+      "abbreviation": "PCER",
+      "name": "Phytoceramide (4-hydroxysphinganine based)",
+      "SMILES": "[Fr]OCC(C(O)C(O)[Rb])N([H])C(=O)[Cs]",
+      "notes": "sphingoid bases with 3 O (t); MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "SL",
+      "name": "Sulfonolipid (capnine based)",
+      "SMILES": "OS(=O)(=O)CC(C(O)[Rb])N([H])C(=O)[Cs]",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "NAGly",
+      "name": "N-(3-acyloxy-acyl)glycine",
+      "SMILES": "OC(=O)CN([H])C(=O)CC(C[Cs])OC([Rb])=O",
+      "notes": "like OL (NAOrn), first chain the hydroxy fatty acid, second the ester; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "NAGlySer",
+      "name": "N-(3-acyloxy-acyl)glycylserine",
+      "SMILES": "OC(=O)C(CO)N([H])C(=O)CN([H])C(=O)CC(C[Cs])OC([Rb])=O",
+      "notes": "like OL (NAOrn), first chain the hydroxy fatty acid, second the ester; MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "CAR",
+      "name": "acylcarnitine",
+      "SMILES": "[Cs]C(=O)OC(CC(=O)O)C[N+](C)(C)C",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of CAR 4:0 replaced"
+    },
+    {
+      "abbreviation": "CE",
+      "name": "cholesteryl ester",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(=CCC3C2CCC2(C)C(C(C)CCCC(C)C)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of CE 8:0 replaced"
+    },
+    {
+      "abbreviation": "NAE",
+      "name": "N-acylethanolamine",
+      "SMILES": "[Cs]C(=O)NCCO",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of NAE 12:0 replaced"
+    },
+    {
+      "abbreviation": "SE 28:1",
+      "name": "SE 28:1",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(=CCC3C2CCC2(C)C(C(C)CCC(C)C(C)C)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of SE 28:1/8:0 replaced"
+    },
+    {
+      "abbreviation": "SE 28:2",
+      "name": "SE 28:2",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(=CCC3C2CCC2(C)C(C(C)C=CC(C)C(C)C)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of SE 28:2/8:0 replaced"
+    },
+    {
+      "abbreviation": "SE 29:1",
+      "name": "SE 29:1",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(=CCC3C2CCC2(C)C(C(C)CCC(CC)C(C)C)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of SE 29:1/8:0 replaced"
+    },
+    {
+      "abbreviation": "SE 29:2",
+      "name": "SE 29:2",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(=CCC3C2CCC2(C)C(C(C)C=CC(CC)C(C)C)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of SE 29:2/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O3;G",
+      "name": "ST 24:1;O3;G",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(CCC3C2CCC2(C)C(C(C)CCC(=O)NCC(=O)O)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 24:1;O3;G/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O3;T",
+      "name": "ST 24:1;O3;T",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(CCC3C2CCC2(C)C(C(C)CCC(O)=NCCS(=O)(=O)O)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 24:1;O3;T/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O4",
+      "name": "ST 24:1;O4",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(CCC3C2CC(O)C2(C)C(C(C)CCC(=O)O)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 24:1;O4/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O4;G",
+      "name": "ST 24:1;O4;G",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(CCC3C2CC(O)C2(C)C(C(C)CCC(=O)NCC(=O)O)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 24:1;O4;G/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O4;T",
+      "name": "ST 24:1;O4;T",
+      "SMILES": "[Cs]C(=O)OC1CCC2(C)C(CCC3C2CC(O)C2(C)C(C(C)CCC(O)=NCCS(=O)(=O)O)CCC32)C1",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 24:1;O4;T/8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 27:1;O;Hex",
+      "name": "ST 27:1;O;Hex",
+      "SMILES": "[Cs]C(=O)OCC1OC(OC2CCC3(C)C(=CCC4C3CCC3(C)C(C(C)CCCC(C)C)CCC43)C2)C(O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 27:1;O;Hex;FA 8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 28:1;O;Hex",
+      "name": "ST 28:1;O;Hex",
+      "SMILES": "[Cs]C(=O)OCC1OC(OC2CCC3(C)C(=CCC4C3CCC3(C)C(C(C)CCC(C)C(C)C)CCC43)C2)C(O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 28:1;O;Hex;FA 8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 28:2;O;Hex",
+      "name": "ST 28:2;O;Hex",
+      "SMILES": "[Cs]C(=O)OCC1OC(OC2CCC3(C)C(=CCC4C3CCC3(C)C(C(C)C=CC(C)C(C)C)CCC43)C2)C(O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 28:2;O;Hex;FA 8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 29:1;O;Hex",
+      "name": "ST 29:1;O;Hex",
+      "SMILES": "[Cs]C(=O)OCC1OC(OC2CCC3(C)C(=CCC4C3CCC3(C)C(C(C)CCC(CC)C(C)C)CCC43)C2)C(O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 29:1;O;Hex;FA 8:0 replaced"
+    },
+    {
+      "abbreviation": "ST 29:2;O;Hex",
+      "name": "ST 29:2;O;Hex",
+      "SMILES": "[Cs]C(=O)OCC1OC(OC2CCC3(C)C(=CCC4C3CCC3(C)C(C(C)C=CC(CC)C(C)C)CCC43)C2)C(O)C(O)C1O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of ST 29:2;O;Hex;FA 8:0 replaced"
+    },
+    {
+      "abbreviation": "VAE",
+      "name": "vitamin A (retinyl) ester",
+      "SMILES": "[Cs]C(=O)OCC=C(C)C=CC=C(C)C=CC1=C(C)CCCC1(C)C",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite: acyl chain of VAE 10:0 replaced"
+    },
+    {
+      "abbreviation": "ST 24:1;O3;S",
+      "name": "ST 24:1;O3;S",
+      "SMILES": "C[C@H](CCC(O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3CC[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:2;O3;S",
+      "name": "ST 24:2;O3;S",
+      "SMILES": "C[C@H](CCC(O)=O)[C@H]1CC[C@H]2[C@H]3[C@H](CC[C@]12C)[C@@]1(C)CC[C@H](C[C@H]1CC3=O)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O4;S",
+      "name": "ST 24:1;O4;S",
+      "SMILES": "C[C@H](CCC(O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O5;S",
+      "name": "ST 24:1;O5;S",
+      "SMILES": "C[C@H](CCC(O)=O)[C@H]1CC[C@H]2[C@@H]3[C@H](O)C[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O3;G;S",
+      "name": "ST 24:1;O3;G;S",
+      "SMILES": "C[C@H](CCC(=O)NCC(O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3CC[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O4;G;S",
+      "name": "ST 24:1;O4;G;S",
+      "SMILES": "C[C@H](CCC(=O)NCC(O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O5;G;S",
+      "name": "ST 24:1;O5;G;S",
+      "SMILES": "C[C@H](CCC(=O)NCC(O)=O)[C@H]1CC[C@H]2[C@@H]3[C@H](O)C[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O3;T;S",
+      "name": "ST 24:1;O3;T;S",
+      "SMILES": "C[C@H](CCC(=O)NCCS(O)(=O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3CC[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O4;T;S",
+      "name": "ST 24:1;O4;T;S",
+      "SMILES": "C[C@H](CCC(=O)NCCS(O)(=O)=O)[C@H]1CC[C@H]2[C@@H]3CC[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 24:1;O5;T;S",
+      "name": "ST 24:1;O5;T;S",
+      "SMILES": "C[C@H](CCC(=O)NCCS(O)(=O)=O)[C@H]1CC[C@H]2[C@@H]3[C@H](O)C[C@@H]4C[C@@H](CC[C@]4(C)[C@H]3C[C@H](O)[C@]12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 27:1;O;S",
+      "name": "ST 27:1;O;S",
+      "SMILES": "CC(C)CCCC(C)C1CCC2C3CC=C4CC(CCC4(C)C3CCC12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 28:2;O;S",
+      "name": "ST 28:2;O;S",
+      "SMILES": "CC(C)C(C)C=CC(C)C1CCC2C3CC=C4CC(CCC4(C)C3CCC12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 28:1;O;S",
+      "name": "ST 28:1;O;S",
+      "SMILES": "CC(C)C(C)CCC(C)C1CCC2C3CC=C4CC(CCC4(C)C3CCC12C)OS(O)(=O)=O",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 29:1;O;S",
+      "name": "ST 29:1;O;S",
+      "SMILES": "CCC(CCC(C)C1CCC2C3CC=C4CC(CCC4(C)C3CCC12C)OS(O)(=O)=O)C(C)C",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
+    },
+    {
+      "abbreviation": "ST 29:2;O;S",
+      "name": "ST 29:2;O;S",
+      "SMILES": "CCC(C=CC(C)C1CCC2C3CC=C4CC(CCC4(C)C3CCC12C)OS(O)(=O)=O)C(C)C",
+      "notes": "MS-DIAL library in library_arch_mp1_msdial_jul.sqlite"
     }
   ],
   "quinones": [

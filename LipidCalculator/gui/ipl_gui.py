@@ -22,19 +22,19 @@ from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import
 from LipidCalculator.rdkit.plotting import mol_to_img
 from LipidCalculator.rdkit.util import mol_from_str
 from LipidCalculator.gui.common import (
-    PAD, ADDUCTS, ResultTable, SendTargets, add_labeled, hill_formula, run_in_thread, send_buttons, show_error
+    PAD, ADDUCTS, ResultTable, SearchCombobox, SendTargets, add_labeled, hill_formula, run_in_thread, send_buttons,
+    show_error
 )
 
 NO_HEAD: str = '(none)'
 SEP: str = ' – '
-# cores that only take a single chain (see ipl_automatic_bonds)
-SINGLE_CHAIN_CORES: tuple[str, ...] = ('OL',)
 DEFAULT_BATCH_ADDUCTS: list[str] = ['[M+H]+', '[M+NH4]+', '[M+Na]+']
 
 
 def _piece_labels(groups: list[str]) -> list[str]:
     df = DATA_FRAME_IPL_PIECES[DATA_FRAME_IPL_PIECES.group.isin(groups)]
-    return [abbr if pd.isna(name) else f'{abbr}{SEP}{name}' for abbr, name in zip(df.abbreviation, df.name)]
+    return [abbr if pd.isna(name) or name == abbr else f'{abbr}{SEP}{name}'
+            for abbr, name in zip(df.abbreviation, df.name)]
 
 
 HEAD_LABELS: list[str] = [NO_HEAD] + _piece_labels(['head groups', 'functional groups'])
@@ -48,8 +48,9 @@ def abbreviation(label: str) -> str | None:
     return None if abbr == NO_HEAD else abbr
 
 
-def takes_chains(core: str) -> bool:
-    return (core, 'Cs') in CORE_IMPLICIT_CHAIN
+def takes_chains(piece: str) -> bool:
+    """Whether chains can be attached to the core or head group"""
+    return any((piece, placeholder) in CORE_IMPLICIT_CHAIN for placeholder in ('Cs', 'Rb'))
 
 
 @lru_cache(maxsize=None)
@@ -64,49 +65,50 @@ def takes_core_double_bonds(core: str) -> bool:
     return has_biphytanyl_chains(mol_from_str(get_struct(core)))
 
 
-def parse_chain(chain: str) -> tuple[int, int] | None:
-    """'34:1' or 'C34:1' --> (34, 1), empty --> None"""
-    chain = chain.strip()
-    if chain == '':
-        return None
-    match = re.fullmatch(r'C?(\d+):(\d+)', chain)
-    if match is None:
-        raise ValueError(f'chain "{chain}" must have the form 34:1 (carbon atoms:double bonds)')
-    return int(match.group(1)), int(match.group(2))
+def parse_chains(chains: str) -> list[str]:
+    """'16:0_18:1' or '18:1/16:0;(2OH)' --> ['C16:0', 'C18:1'] or ['C18:1', 'C16:0;(2OH)'], empty --> []"""
+    out = []
+    for chain in re.split(r'[_/]', chains.strip()) if chains.strip() else []:
+        match = re.fullmatch(r'C?(\d+):(\d+)((?:;(?:\(\d+OH\)|\d*O))*)', chain.strip())
+        if match is None:
+            raise ValueError(f'chain "{chain}" must have the form 34:1 (carbon atoms:double bonds), optionally '
+                             f'with hydroxyl groups like 16:0;(2OH) or 24:0;O')
+        out.append(f'C{match.group(1)}:{match.group(2)}{match.group(3)}')
+    return out
 
 
 def build_ipl(
         head: str | None,
         core: str,
-        chains: list[tuple[int, int]],
+        chains: list[str],
         split_chain: bool = True,
         sort_chains: bool = True,
-        remove_double_oxygen: bool = True,
         head2: str | None = None,
         core_chains: str | None = None,
         core_double_bonds: int = 0
 ) -> Mol:
-    """Build an IPL, chain lengths include the C atoms of the core (lipid shorthand). head2 is bonded to the
+    """Build an IPL, chains like C16:0 or C16:0;(2OH), chain lengths include the C atoms of the core (lipid
+    shorthand), chains are attached to the core first, then to head groups with chains. head2 is bonded to the
     second attachment point of the core (e.g. other glycerol of GDGTs), core_chains sets the isoprenoid chains
     of the core (e.g. '20:1_25:0'), core_double_bonds the double bonds in the biphytanyl chains of tetraethers."""
     if core not in ABBREVIATIONS:
         raise ValueError(f'unknown core {core}')
-    if chains and not takes_chains(core):
-        raise ValueError(f'core {core} cannot be connected to chains')
-    if core in SINGLE_CHAIN_CORES and len(chains) > 1:
-        raise ValueError(f'core {core} only takes one chain')
+    for head_ in (head, head2):
+        if head_ and head_ not in ABBREVIATIONS:
+            raise ValueError(f'unknown head group {head_}')
+    if chains and not any(takes_chains(p) for p in (head, head2, core) if p):
+        raise ValueError(f'{core} cannot be connected to chains')
     if core_chains and not isoprenoid_chains(core):
         raise ValueError(f'core {core} has no isoprenoid chains')
     if core_double_bonds and not takes_core_double_bonds(core):
         raise ValueError(f'core {core} has no biphytanyl chains')
-    names = [h for h in (head, head2) if h] + [core] + [f'C{n_c}:{n_db}' for n_c, n_db in chains]
+    names = [h for h in (head, head2) if h] + [core] + list(chains)
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         return ipl_automatic_bonds(
             names,
-            split_chain=split_chain and len(chains) == 1 and core not in SINGLE_CHAIN_CORES,
+            split_chain=split_chain and len(chains) == 1,
             sort_chains=sort_chains,
-            remove_double_oxygen=remove_double_oxygen,
             core_chains=core_chains or None,
             core_double_bonds=core_double_bonds or None
         )
@@ -115,7 +117,7 @@ def build_ipl(
 UNSATURATION_PREFIXES: list[str] = ['', 'Mono', 'Di', 'Tri', 'Tetra', 'Penta', 'Hexa', 'Hepta', 'Octa']
 
 
-def ipl_name(head: str | None, core: str, chains: list[tuple[int, int]], head2: str | None = None,
+def ipl_name(head: str | None, core: str, chains: list[str], head2: str | None = None,
              core_chains: str | None = None, core_double_bonds: int = 0) -> str:
     """e.g. PE-AR(20:0_20:1), 2G-(PG-)Di-uns-GDGT0 or PC-DAG 34:1"""
     name = core if not core_chains else f'{core}({core_chains})'
@@ -128,7 +130,7 @@ def ipl_name(head: str | None, core: str, chains: list[tuple[int, int]], head2: 
     if head:
         name = f'{head}-{name}'
     if chains:
-        name += ' ' + '/'.join(f'{n_c}:{n_db}' for n_c, n_db in chains)
+        name += ' ' + '/'.join(chain[1:] for chain in chains)
     return name
 
 
@@ -139,15 +141,13 @@ class SingleIPLFrame(ttk.Frame):
         super().__init__(master, padding=PAD, **kwargs)
         self.head_var = tk.StringVar(self, value=next(l for l in HEAD_LABELS if l.startswith('PC')))
         self.core_var = tk.StringVar(self, value=next(l for l in CORE_LABELS if l.startswith('DAG')))
-        self.chain1_var = tk.StringVar(self, value='34:1')
-        self.chain2_var = tk.StringVar(self, value='')
+        self.chains_var = tk.StringVar(self, value='34:1')
         self.head2_var = tk.StringVar(self, value=NO_HEAD)
         self.core_chains_var = tk.StringVar(self, value='')
         self.core_chains_hint_var = tk.StringVar(self, value='')
         self.core_db_var = tk.IntVar(self, value=0)
         self.split_var = tk.BooleanVar(self, value=True)
         self.sort_var = tk.BooleanVar(self, value=True)
-        self.oop_var = tk.BooleanVar(self, value=True)
         self.name_var = tk.StringVar(self, value='')
         self.formula_var = tk.StringVar(self, value='')
         self.mass_var = tk.StringVar(self, value='')
@@ -165,39 +165,38 @@ class SingleIPLFrame(ttk.Frame):
 
         inputs = ttk.LabelFrame(left, text='Building blocks', padding=PAD)
         inputs.pack(fill='x')
-        add_labeled(inputs, 0, 'Head group', ttk.Combobox(inputs, textvariable=self.head_var, values=HEAD_LABELS,
-                                                          state='readonly', width=34))
-        add_labeled(inputs, 1, 'Head group 2', ttk.Combobox(inputs, textvariable=self.head2_var, values=HEAD_LABELS,
-                                                            state='readonly', width=34))
-        # editable, typing filters the long list of cores
-        self.core_cb = add_labeled(inputs, 2, 'Core', ttk.Combobox(inputs, textvariable=self.core_var,
-                                                                   values=CORE_LABELS, width=34))
-        self.core_cb.bind('<<ComboboxSelected>>', lambda _: self._update_chain_state())
-        self.core_cb.bind('<KeyRelease>', self._filter_cores)
-        self.core_cb.bind('<Return>', lambda _: (self._update_chain_state(), self.build()))
+        # typing shows the matching entries
+        for row, (label, var) in enumerate([('Head group', self.head_var), ('Head group 2', self.head2_var)]):
+            head_cb = add_labeled(inputs, row, label, SearchCombobox(inputs, textvariable=var, values=HEAD_LABELS,
+                                                                     width=34))
+            head_cb.bind('<<ComboboxSelected>>', lambda _: self._update_chain_state(keep_values=True), add='+')
+            head_cb.bind('<Return>', lambda _: (self._update_chain_state(keep_values=True), self.build()), add='+')
+        self.core_cb = add_labeled(inputs, 2, 'Core', SearchCombobox(inputs, textvariable=self.core_var,
+                                                                     values=CORE_LABELS, width=34))
+        self.core_cb.bind('<<ComboboxSelected>>', lambda _: self._update_chain_state(), add='+')
+        self.core_cb.bind('<Return>', lambda _: (self._update_chain_state(), self.build()), add='+')
         self.core_chains_entry = add_labeled(inputs, 3, 'Isoprenoid chains',
                                              ttk.Entry(inputs, textvariable=self.core_chains_var))
         ttk.Label(inputs, textvariable=self.core_chains_hint_var, foreground='gray', justify='left',
                   wraplength=320).grid(row=4, column=0, columnspan=2, sticky='w', padx=PAD)
         self.core_db_entry = add_labeled(inputs, 5, 'Biphytanyl double bonds',
                                          ttk.Spinbox(inputs, from_=0, to=8, textvariable=self.core_db_var, width=5))
-        self.chain1_entry = add_labeled(inputs, 6, 'Chain 1 (C:DB)', ttk.Entry(inputs, textvariable=self.chain1_var))
-        self.chain2_entry = add_labeled(inputs, 7, 'Chain 2 (C:DB)', ttk.Entry(inputs, textvariable=self.chain2_var))
-        for entry in (self.chain1_entry, self.chain2_entry, self.core_chains_entry, self.core_db_entry):
+        self.chains_entry = add_labeled(inputs, 6, 'Chains (C:DB)', ttk.Entry(inputs, textvariable=self.chains_var))
+        for entry in (self.chains_entry, self.core_chains_entry, self.core_db_entry):
             entry.bind('<Return>', lambda _: self.build())
         ttk.Label(
             inputs, foreground='gray', justify='left', wraplength=320,
-            text='Chain lengths include the C atoms of the core. Leave chain 2 empty to give the total '
-                 'composition (e.g. 34:1), which is split equally between both chains. Head group 2 is '
-                 'bonded to the second attachment point of the core (other glycerol of tetraethers).'
-        ).grid(row=8, column=0, columnspan=2, sticky='w', padx=PAD)
+            text='Chains separated by _ or /, e.g. 16:0_18:1 or 18:1/16:0;(2OH) (hydroxyl groups: ;(2OH), ;O). '
+                 'Chain lengths include the C atoms of the core. A single total composition (e.g. 34:1) is split '
+                 'between two chains. Chains go to the core first, then to head groups with chains (e.g. Acyl for '
+                 'TG). Head group 2 is bonded to the second attachment point of the core (other glycerol of '
+                 'tetraethers, 3-OH of ceramides).'
+        ).grid(row=7, column=0, columnspan=2, sticky='w', padx=PAD)
 
         opts = ttk.LabelFrame(left, text='Options', padding=PAD)
         opts.pack(fill='x', pady=PAD)
         ttk.Checkbutton(opts, text='Split single chain into two', variable=self.split_var).pack(anchor='w')
         ttk.Checkbutton(opts, text='Longest chain first', variable=self.sort_var).pack(anchor='w')
-        ttk.Checkbutton(opts, text='Glycerol O bonds directly to P (O-O-P → O-P)', variable=self.oop_var).pack(
-            anchor='w')
         ttk.Button(left, text='Build', command=self.build).pack(fill='x', pady=PAD)
 
         props = ttk.LabelFrame(left, text='Properties', padding=PAD)
@@ -223,17 +222,12 @@ class SingleIPLFrame(ttk.Frame):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
-    def _filter_cores(self, event) -> None:
-        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab'):
-            return
-        text = self.core_var.get().lower()
-        self.core_cb['values'] = [label for label in CORE_LABELS if text in label.lower()] or CORE_LABELS
-
-    def _update_chain_state(self) -> None:
+    def _update_chain_state(self, keep_values: bool = False) -> None:
         core = abbreviation(self.core_var.get())
-        state = ['!disabled'] if takes_chains(core) else ['disabled']
-        self.chain1_entry.state(state)
-        self.chain2_entry.state(state)
+        pieces = [core, abbreviation(self.head_var.get()), abbreviation(self.head2_var.get())]
+        self.chains_entry.state(['!disabled'] if any(p and takes_chains(p) for p in pieces) else ['disabled'])
+        if keep_values:
+            return
         tetraether = core in ABBREVIATIONS and takes_core_double_bonds(core)
         self.core_db_entry.state(['!disabled'] if tetraether else ['disabled'])
         self.core_db_var.set(0)
@@ -249,10 +243,10 @@ class SingleIPLFrame(ttk.Frame):
                                           'chains), e.g. 20:1_25:0. Double bonds start at Δ2, 0:0 removes a '
                                           'chain.')
 
-    def _read_chains(self, core: str) -> list[tuple[int, int]]:
-        if not takes_chains(core):
+    def _read_chains(self, core: str) -> list[str]:
+        if self.chains_entry.instate(['disabled']):
             return []
-        return [c for c in (parse_chain(self.chain1_var.get()), parse_chain(self.chain2_var.get())) if c is not None]
+        return parse_chains(self.chains_var.get())
 
     def build(self) -> None:
         head = abbreviation(self.head_var.get())
@@ -263,7 +257,7 @@ class SingleIPLFrame(ttk.Frame):
             core_db = int(self.core_db_var.get()) if self.core_db_entry.instate(['!disabled']) else 0
             chains = self._read_chains(core)
             mol = build_ipl(head, core, chains, split_chain=self.split_var.get(), sort_chains=self.sort_var.get(),
-                            remove_double_oxygen=self.oop_var.get(), head2=head2, core_chains=core_chains,
+                            head2=head2, core_chains=core_chains,
                             core_double_bonds=core_db)
         except Exception as e:
             show_error(self, e, title='Could not build IPL')
@@ -336,7 +330,6 @@ class BatchIPLFrame(ttk.Frame):
         self.db_min_var = tk.StringVar(self, value='0')
         self.db_max_var = tk.StringVar(self, value='2')
         self.even_var = tk.BooleanVar(self, value=True)
-        self.oop_var = tk.BooleanVar(self, value=True)
         self.status_var = tk.StringVar(self, value='Select head groups, cores and adducts, then press "Generate".')
         self._build()
 
@@ -381,8 +374,6 @@ class BatchIPLFrame(ttk.Frame):
             add_labeled(ranges, row, label, frame)
         ttk.Checkbutton(ranges, text='Even carbon numbers only', variable=self.even_var).grid(
             row=2, column=0, columnspan=2, sticky='w', padx=PAD)
-        ttk.Checkbutton(ranges, text='Glycerol O bonds directly to P (O-O-P → O-P)', variable=self.oop_var).grid(
-            row=3, column=0, columnspan=2, sticky='w', padx=PAD)
 
         self.run_button = ttk.Button(left, text='Generate', command=self.run)
         self.run_button.pack(fill='x')
@@ -409,9 +400,9 @@ class BatchIPLFrame(ttk.Frame):
             db_range = range(int(self.db_min_var.get()), int(self.db_max_var.get()) + 1)
         except ValueError:
             raise ValueError('chain ranges must be whole numbers')
-        chains = [(c, db) for c, db in product(c_range, db_range)
+        chains = [f'C{c}:{db}' for c, db in product(c_range, db_range)
                   if (not self.even_var.get() or c % 2 == 0) and db <= c // 2]
-        return dict(heads=heads, cores=cores, adducts=adducts, chains=chains, oop=self.oop_var.get())
+        return dict(heads=heads, cores=cores, adducts=adducts, chains=chains)
 
     def run(self) -> None:
         try:
@@ -434,14 +425,14 @@ class BatchIPLFrame(ttk.Frame):
             rows, failed = [], []
             for head, core, chains in combos:
                 try:
-                    mol = build_ipl(head, core, chains, remove_double_oxygen=params['oop'])
+                    mol = build_ipl(head, core, chains)
                 except Exception:
                     failed.append(ipl_name(head, core, chains))
                     continue
                 mass = ExactMolWt(mol)
                 rows.append(
                     [ipl_name(head, core, chains), head or '', core,
-                     '/'.join(f'{c}:{db}' for c, db in chains),
+                     '/'.join(chain[1:] for chain in chains),
                      rdMolDescriptors.CalcMolFormula(mol), f'{mass:.5f}']
                     + [f'{a.mass_to_mz(mass):.5f}' for a in adducts]
                     + [Chem.MolToSmiles(mol)]
