@@ -72,8 +72,8 @@ ELEMENTS: list[str] = 'C H O N P S'.split()
 N_ELEMENTS: int = len(ELEMENTS)
 MASSES: list[float] = [CompoundDict(el).mass for el in ELEMENTS]
 ELEMENT_TO_INDEX: dict[str, int] = dict(zip(ELEMENTS, range(N_ELEMENTS)))
-# double bond equivalents used for DBE calculation, 2 * DBE
-DBE: list[int] = [dict(C=1, H=-1 / 2, O=0, N=1 / 2, P=1 / 2, S=0)[el] for el in ELEMENTS]
+# contribution of each atom to the DBE
+DBE: list[float] = [dict(C=1., H=-1 / 2, O=0., N=1 / 2, P=1 / 2, S=0.)[el] for el in ELEMENTS]
 
 IDX_C: int = ELEMENT_TO_INDEX['C']
 IDX_H: int = ELEMENT_TO_INDEX['H']
@@ -92,14 +92,26 @@ def get_upper_bound(el: str, n_c: int, mass_left: float) -> int:
 
 
 def get_h_range(vec: list[int], mass: float) -> range:
-    """Hydrogen counts compatible with the mass range, H/C ratio and DBE, given all other elements in vec."""
+    """
+    Hydrogen counts compatible with the mass range, H/C ratio and DBE, given all other elements in vec.
+
+    All three constraints only give a lower and an upper limit for H, so the valid H counts form one block.
+    """
     n_c: int = vec[IDX_C]
 
+    # mass: mass + H * m_H has to lie within MASS_RANGE
     lower: int = max(0, math.ceil((MASS_RANGE[0] - mass) / MASSES[IDX_H]))
+    # upper limit from the mass, RANGES and the H/C ratio
     upper: int = get_upper_bound('H', n_c, MASS_RANGE[1] - mass)
+    # H/C ratio: H >= ratio_min * C
     if ('H', 'C') in RATIOS:
         lower = max(lower, math.ceil(RATIOS[('H', 'C')][0] * n_c))
-        return range(lower, upper + 1)
+    # DBE: DBE = dbe_without_h - H / 2, so more H means a lower DBE
+    # DBE <= DBE_max  <=>  H >= 2 * (dbe_without_h - DBE_max)
+    # DBE >= DBE_min  <=>  H <= 2 * (dbe_without_h - DBE_min)
+    dbe_without_h: float = get_dbe(vec) - vec[IDX_H] * DBE[IDX_H]
+    lower = max(lower, math.ceil(2 * (dbe_without_h - DBE_RANGE[1])))
+    upper = min(upper, math.floor(2 * (dbe_without_h - DBE_RANGE[0])))
     return range(lower, upper + 1)
 
 
@@ -121,11 +133,13 @@ def get_candidates_for_c(n_c: int) -> np.ndarray:
         if depth == len(others):
             if not check_sums(vec):
                 return
-            for n_h in get_h_range(vec, mass):
-                vec[IDX_H] = n_h
-                if check_mass(mass + n_h * MASSES[IDX_H]) and check_ranges(vec):
-                    candidates.extend(vec)
-            vec[IDX_H] = 0
+            h_range: range = get_h_range(vec, mass)
+            if not len(h_range):
+                return
+            # all H counts in h_range are valid (see get_h_range), so add them as one block
+            block: np.ndarray = np.tile(np.array(vec, dtype=np.uint16), (len(h_range), 1))
+            block[:, IDX_H] = h_range
+            candidates.frombytes(block.tobytes())
             return
         el: str = others[depth]
         idx: int = ELEMENT_TO_INDEX[el]
