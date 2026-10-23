@@ -22,9 +22,8 @@ def check_mass(m: float) -> bool:
     return MASS_RANGE[0] <= m <= MASS_RANGE[1]
 
 
-def get_dbe2(vec: list[int]) -> int:
-    """Twice the double bond equivalent (kept as int to avoid floats): 2 + sum n_i * (v_i - 2)."""
-    return 2 + sum(n * (VALENCES[idx] - 2) for idx, n in enumerate(vec))
+def get_dbe(vec: list[int]) -> float:
+    return 1 + sum(el_count * DBE[idx] for idx, el_count in enumerate(vec))
 
 
 def check_sums(vec: list[int]) -> bool:
@@ -36,10 +35,8 @@ def check_sums(vec: list[int]) -> bool:
 
 
 def check_dbe(vec: list[int]) -> bool:
-    dbe2: int = get_dbe2(vec)
-    if not ALLOW_HALF_INTEGER_DBE and dbe2 % 2:
-        return False
-    return 2 * DBE_RANGE[0] <= dbe2 <= 2 * DBE_RANGE[1]
+    dbe: float = get_dbe(vec)
+    return DBE_RANGE[0] <= dbe <= DBE_RANGE[1]
 
 
 def check_ranges(vec: list[int]) -> bool:
@@ -58,27 +55,25 @@ def check_ranges(vec: list[int]) -> bool:
 
 MASS_RANGE = (100, 2000)
 
-RANGES = dict(N=(0, 35), P=(0, 6), S=(0, 6), C=(3, 130))
+RANGES = dict(N=(0, 35), P=(0, 6), S=(0, 6), C=(3, 130), O=(0, 60))
 RATIOS = {
-    ('H', 'C'): (0, 6.),
-    ('O', 'C'): (0, 4.)
+    ('H', 'C'): (0., 6.),
+    ('O', 'C'): (0., 4.)
 }
 # limits for the summed counts of several elements
 SUM_RANGES = {
     ('N', 'P', 'S'): (0, 35),
     ('N', 'P'): (0, 35),
-    ('S', 'P'): (0, 8),
+    ('S', 'P'): (0, 6),
+    ('S', 'N'): (0, 35),
 }
-DBE_RANGE = (0, 40)
-# half-integer DBEs correspond to radicals, which are excluded for neutral molecules
-ALLOW_HALF_INTEGER_DBE = False
-
+DBE_RANGE = (-3., 61.)
 ELEMENTS: list[str] = 'C H O N P S'.split()
 N_ELEMENTS: int = len(ELEMENTS)
 MASSES: list[float] = [CompoundDict(el).mass for el in ELEMENTS]
 ELEMENT_TO_INDEX: dict[str, int] = dict(zip(ELEMENTS, range(N_ELEMENTS)))
-# valences used for the DBE, set P to 5 to treat it as pentavalent
-VALENCES: list[int] = [dict(C=4, H=1, O=2, N=3, P=3, S=2)[el] for el in ELEMENTS]
+# double bond equivalents used for DBE calculation, 2 * DBE
+DBE: list[int] = [dict(C=1, H=-1 / 2, O=0, N=1 / 2, P=1 / 2, S=0)[el] for el in ELEMENTS]
 
 IDX_C: int = ELEMENT_TO_INDEX['C']
 IDX_H: int = ELEMENT_TO_INDEX['H']
@@ -99,18 +94,12 @@ def get_upper_bound(el: str, n_c: int, mass_left: float) -> int:
 def get_h_range(vec: list[int], mass: float) -> range:
     """Hydrogen counts compatible with the mass range, H/C ratio and DBE, given all other elements in vec."""
     n_c: int = vec[IDX_C]
+
     lower: int = max(0, math.ceil((MASS_RANGE[0] - mass) / MASSES[IDX_H]))
     upper: int = get_upper_bound('H', n_c, MASS_RANGE[1] - mass)
     if ('H', 'C') in RATIOS:
         lower = max(lower, math.ceil(RATIOS[('H', 'C')][0] * n_c))
-    # every H lowers 2 * DBE by one
-    dbe2_without_h: int = get_dbe2(vec) - vec[IDX_H] * (VALENCES[IDX_H] - 2)
-    lower = max(lower, dbe2_without_h - 2 * DBE_RANGE[1])
-    upper = min(upper, dbe2_without_h - 2 * DBE_RANGE[0])
-    if not ALLOW_HALF_INTEGER_DBE:
-        # H needs the same parity as 2 * DBE without H for an integer DBE
-        lower += (lower - dbe2_without_h) % 2
-        return range(lower, upper + 1, 2)
+        return range(lower, upper + 1)
     return range(lower, upper + 1)
 
 
