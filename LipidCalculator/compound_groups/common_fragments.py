@@ -7,6 +7,7 @@ MASS_PROTON = 'H+'
 # map compound group to common fragments & losses (positive ion mode)
 # fragments are m/z of singly charged ions, losses are neutral masses
 # keys use the abbreviations from package.json, '<head>-<core>' if the value depends on the core lipid
+# loss keys also name the precursor adduct, losses from [M+NH4]+ include the NH3 of the adduct
 COMMON_DIAGNOSTIC_FRAGMENTS: dict[str, str] = {
     # phospholipids
     'PC': 'C5H15NO4P+',  # phosphocholine, 184.0733
@@ -28,28 +29,28 @@ COMMON_DIAGNOSTIC_FRAGMENTS: dict[str, str] = {
 }
 COMMON_DIAGNOSTIC_LOSSES: dict[str, str] = {
     # phospholipids
-    'PA-DAG': 'H6NO4P',  # [M+NH4]+, H3PO4 + NH3, 115.0034
-    'PG-DAG': 'C3H12NO6P',  # [M+NH4]+, 189.0402
-    'PI-DAG': 'C6H16NO9P',  # [M+NH4]+, 277.0563
-    'PE-DAG': 'C2H8NO4P',  # [M+H]+, 141.0191
-    'PE-DEG': 'C2H5N',  # [M+H]+, aziridine, 43.0422
-    'PME-DAG': 'C3H10NO4P',  # [M+H]+, 155.0347
-    'PME-DEG': 'C3H7N',  # [M+H]+, 57.0578
-    'PDME-DAG': 'C4H12NO4P',  # [M+H]+, 169.0504
-    'PnE-DAG': 'C2H8NO3P',  # [M+H]+, 125.0242
-    'PS-DAG': 'C3H8NO6P',  # [M+H]+, 185.0089
+    'PA-DAG [M+NH4]+': 'H6NO4P',  # H3PO4 + NH3, 115.0034
+    'PG-DAG [M+NH4]+': 'C3H12NO6P',  # 189.0402
+    'PI-DAG [M+NH4]+': 'C6H16NO9P',  # 277.0563
+    'PE-DAG [M+H]+': 'C2H8NO4P',  # 141.0191
+    'PE-DEG [M+H]+': 'C2H5N',  # aziridine, 43.0422
+    'PME-DAG [M+H]+': 'C3H10NO4P',  # 155.0347
+    'PME-DEG [M+H]+': 'C3H7N',  # 57.0578
+    'PDME-DAG [M+H]+': 'C4H12NO4P',  # 169.0504
+    'PnE-DAG [M+H]+': 'C2H8NO3P',  # 125.0242
+    'PS-DAG [M+H]+': 'C3H8NO6P',  # 185.0089
     # aminolipids
-    'OL': 'C5H9NO2',  # [M+H]+, 115.0633
-    'APT-DAG': 'C5H14NO7P',  # [M+H]+, phospho-APT, 231.0508
-    'APT-DEG': 'C5H11NO3',  # [M+H]+, APT - H2O, 133.0739
-    'N,N,N-3Me-APT-DAG': 'C8H20NO7P',  # [M+H]+, 273.0977
-    'N,N,N-3Me-APT-DEG': 'C8H17NO3',  # [M+H]+, 175.1208
+    'OL [M+H]+': 'C5H9NO2',  # 115.0633
+    'APT-DAG [M+H]+': 'C5H14NO7P',  # phospho-APT, 231.0508
+    'APT-DEG [M+H]+': 'C5H11NO3',  # APT - H2O, 133.0739
+    'N,N,N-3Me-APT-DAG [M+H]+': 'C8H20NO7P',  # 273.0977
+    'N,N,N-3Me-APT-DEG [M+H]+': 'C8H17NO3',  # 175.1208
     # glycolipids
-    '1G-DAG': 'C6H15NO6',  # [M+NH4]+, hexose + NH3, 197.0899
-    '2G-DAG': 'C12H23NO10',  # [M+NH4]+, glucuronic acid + NH3, 211.0692
-    'SQ-DAG': 'C6H15NO8S',  # [M+NH4]+, 261.0518
-    '1G-AR': 'C6H13NO5',  # [M+NH4]+, hexose - H2O + NH3, 179.0794
-    '2G-AR': 'C12H23NO10',  # [M+NH4]+, 341.1322
+    '1G-DAG [M+NH4]+': 'C6H15NO6',  # hexose + NH3, 197.0899
+    '2G-DAG [M+NH4]+': 'C12H23NO10',  # 2 hexose - H2O + NH3, 341.1322
+    'SQ-DAG [M+NH4]+': 'C6H15NO8S',  # sulfoquinovose + NH3, 261.0518
+    '1G-AR [M+NH4]+': 'C6H13NO5',  # hexose - H2O + NH3, 179.0794
+    '2G-AR [M+NH4]+': 'C12H23NO10',  # 2 hexose - H2O + NH3, 341.1322
 }
 
 DIAGNOSTIC_FRAGMENTS_AND_LOSSES: pd.DataFrame = pd.DataFrame(
