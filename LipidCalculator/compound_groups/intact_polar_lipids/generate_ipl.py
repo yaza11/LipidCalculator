@@ -61,7 +61,7 @@ from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import
     get_smiles, CORE_IMPLICIT_CHAIN, ABBREVIATION_TO_GROUP, ABBREVIATIONS, IPL_PIECES, CORE_GROUPS, \
     CHAINS_IN_ISOPRENE_UNITS, CHAIN_PLACEHOLDERS, implicit_chain
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_chains import modify_isoprenoid_chains, \
-    clear_chain_marks, add_tetraether_double_bonds
+    clear_chain_marks, add_tetraether_double_bonds, add_isoprenoid_hydroxy, add_isoprenoid_methyls
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_blocks import is_block_core, block_core_smiles
 from LipidCalculator.compound_groups.intact_polar_lipids.archlips_cores import is_archlips_core, archlips_core_smiles
 
@@ -80,6 +80,9 @@ CHAIN_RE = re.compile(r'C(\d+):(\d+)((?:;[^;]+)*)')
 # atom property marking the attachment point of an empty chain (C0:0), value: carbons of the chain in the piece
 EMPTY_CHAIN_PROP = 'empty_chain'
 EMPTY_CHAIN_STRICT_PROP = 'empty_chain_strict'
+# atom properties with the piece an atom of a built molecule comes from: role (head1, head2, core, chain) and name
+PIECE_ROLE_PROP = 'ipl_role'
+PIECE_NAME_PROP = 'ipl_piece'
 
 
 def ceil(a, b):
@@ -516,7 +519,9 @@ def ipl_automatic_bonds(
         plts=False,
         idx_plt: bool = False,
         core_chains: str | None = None,
-        core_double_bonds: int | None = None
+        core_double_bonds: int | None = None,
+        core_hydroxy: int | None = None,
+        core_methyls: int | None = None
 ) -> Mol:
     """
     Attempt to form bonds between pieces automatically by idenitfying piece types and placeholders.
@@ -528,7 +533,9 @@ def ipl_automatic_bonds(
 
     cores with two attachment points (e.g. GDGTs) can take two head groups, the first one is bonded to the
     first attachment point. core_chains sets the isoprenoid chains of the core, e.g. '20:1_25:0' for archaeols,
-    core_double_bonds the number of double bonds in the biphytanyl chains of tetraethers (see isoprenoid_chains.py).
+    core_double_bonds the number of double bonds in the biphytanyl chains of tetraethers, core_hydroxy the number of
+    hydroxyl groups at C3 and core_methyls the number of additional methyl groups at C13 of the isoprenoid chains
+    (see isoprenoid_chains.py).
     """
 
     def _check_piece_types(names_) -> tuple[list[str], list[bool], list[bool], int, str]:
@@ -592,7 +599,8 @@ def ipl_automatic_bonds(
         names.extend([chain1, chain2])
         # call again with split chains
         return ipl_automatic_bonds(names, split_chain=False, sort_chains=sort_chains, plts=plts,
-                                   core_chains=core_chains, core_double_bonds=core_double_bonds)
+                                   core_chains=core_chains, core_double_bonds=core_double_bonds,
+                                   core_hydroxy=core_hydroxy, core_methyls=core_methyls)
 
     chains: list[tuple[int, int, str]] = [_parse_chain(name) for name, _is_chain in zip(names, is_chain) if _is_chain]
     assert len(chains) <= len(targets), \
@@ -644,6 +652,18 @@ def ipl_automatic_bonds(
         mplt_mol(_mol)
         plt.show()
 
+    # mark the atoms with the piece they come from (e.g. to collapse head groups in depictions)
+    for i, piece_mol in enumerate(mols):
+        if i >= len(piece_names):
+            role, piece = 'chain', 'chain'
+        elif i == core_piece:
+            role, piece = 'core', piece_names[i]
+        else:
+            role, piece = f'head{head_pieces.index(i) + 1}', piece_names[i]
+        for atom in piece_mol.GetAtoms():
+            atom.SetProp(PIECE_ROLE_PROP, role)
+            atom.SetProp(PIECE_NAME_PROP, piece)
+
     # supress warnings for placeholders
     mol = _combine_molecules_at_positions(mols, bond_positions=bond_pairs)
     mol = _remove_empty_chain_atoms(mol)
@@ -652,6 +672,10 @@ def ipl_automatic_bonds(
 
     if core_chains:
         mol = modify_isoprenoid_chains(mol, core_chains, in_units=core in CHAINS_IN_ISOPRENE_UNITS)
+    if core_hydroxy:
+        mol = add_isoprenoid_hydroxy(mol, core_hydroxy)
+    if core_methyls:
+        mol = add_isoprenoid_methyls(mol, core_methyls)
     if core_double_bonds:
         mol = add_tetraether_double_bonds(mol, core_double_bonds)
     # atom map numbers only mark the isoprenoid chains in the pieces

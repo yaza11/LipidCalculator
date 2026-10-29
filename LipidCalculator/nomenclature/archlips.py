@@ -37,11 +37,26 @@ UNSATURATION_PREFIX: dict[int, str] = {v: k for k, v in UNSATURATION.items()}
 TETRAETHER: str = (r'(?:(?:' + '|'.join(UNSATURATION) + r')-uns-)?(?:Homo-\d?Me-)?(?:\d?OH-)?'
                                                         r'(?:' + '|'.join(TETRAETHER_FAMILIES) + r')(?:-|$)')
 TETRAETHER_NAME = re.compile(r'^(?P<head>.*?)-?(?P<core>' + TETRAETHER + r'.*)$')
-# tetraether pieces of package.json, e.g. GDGT0, OH-GDGT1, Homo-Me-GDGT-Cren (GDGT5' is not named)
-TETRAETHER_PIECE = re.compile(r'(?P<homo>Homo-\d?Me-)?(?P<oh>\d?OH-)?(?P<family>' + '|'.join(TETRAETHER_FAMILIES)
-                              + r')-?(?P<rings>\d|Cren)')
-# archaeol and its hydroxylated forms in LipidCalculator with their isoprenoid chains in ArchLips notation
-ARCHAEOL_CHAINS: dict[str, str] = {'AR': '20:0_20:0', 'OH-AR': '20:0(OH)_20:0', '2OH-AR': '20:0(OH)_20:0(OH)'}
+# tetraether pieces of package.json, e.g. GDGT0, GDD-Cren, GDGT5' (crenarchaeol with a parallel glycerol)
+TETRAETHER_PIECE = re.compile(r'(?P<family>' + '|'.join(TETRAETHER_FAMILIES) + r')-?(?P<rings>\d|Cren)\'?')
+# isoprenoid chains of archaeol in ArchLips notation
+ARCHAEOL_CHAINS: str = '20:0_20:0'
+
+
+def _count(prefix: str | None, default: int = 1) -> int:
+    """'2OH-' --> 2, 'OH-' --> 1, 'Homo-2Me-' --> 2, None --> 0"""
+    if not prefix:
+        return 0
+    digits = re.search(r'\d', prefix)
+    return int(digits.group(0)) if digits else default
+
+
+def _modification_prefix(n_double_bonds: int, n_methyls: int, n_hydroxy: int) -> str:
+    """e.g. Di-uns-Homo-Me-OH-"""
+    uns = f'{UNSATURATION_PREFIX[n_double_bonds]}-uns-' if n_double_bonds else ''
+    homo = f'Homo-{n_methyls if n_methyls > 1 else ""}Me-' if n_methyls else ''
+    oh = f'{n_hydroxy if n_hydroxy > 1 else ""}OH-' if n_hydroxy else ''
+    return uns + homo + oh
 
 
 def head_abbreviation(head: str) -> str:
@@ -60,26 +75,30 @@ def heads_of(head: str) -> list[str]:
     return [head_abbreviation(head)]
 
 
-def tetraether_piece(core: str) -> tuple[str, int]:
-    """LipidCalculator core piece for a tetraether name and number of double bonds in the biphytanyl chains:
-    the ArchLips structure if the library has it (exact isomer), otherwise the piece with the same formula
-    (isomers like 2a and 2b share a piece), e.g. Di-uns-GDGT-2a --> (GDGT-2a, 2) or (GDGT2, 2)"""
-    if is_archlips_core(core):
-        return core, 0
-    n_double_bonds = 0
-    if m := re.match(r'(' + '|'.join(UNSATURATION) + r')-uns-', core):
-        n_double_bonds, core = UNSATURATION[m.group(1)], core[m.end():]
-        if is_archlips_core(core):
-            return core, n_double_bonds
-    if re.search(r'(?i)-cren(?:[a-z]|_\d+)?$', core):
-        core = re.sub(r'(?i)-cren(?:[a-z]|_\d+)?$', '-Cren', core)
-    elif m := re.fullmatch(r'(.*)-(\d+)(?:[a-z]|_\d+)?', core):
-        core = f'{m.group(1)}{m.group(2)}'
-    if core == 'GDGT-Cren':
-        core = 'GDGT5'  # the GDGT5 piece is crenarchaeol
-    if core not in ABBREVIATIONS:
-        raise NotSupported(f'core {core} missing')
-    return core, n_double_bonds
+def tetraether_core(name: str) -> dict:
+    """Core piece and modifications (keyword arguments of Lipid) for a tetraether name: the ArchLips structure if the
+    library has it (exact isomer), otherwise the unmodified core with double bonds, methyl and hydroxyl groups added
+    by rules (see isoprenoid_chains.py), its isomer label is kept, e.g.
+    Di-uns-GDGT-2a --> dict(core='GDGT-2a', core_double_bonds=2), OH-GDGT-9 --> NotSupported"""
+    if is_archlips_core(name):
+        return dict(core=name)
+    m = CORE_NAME.fullmatch(name)
+    if m is None:
+        raise NotSupported(f'{name} is not a tetraether core')
+    n_double_bonds = UNSATURATION[m['uns']] if m['uns'] else 0
+    if n_double_bonds and is_archlips_core(name[m.end('uns') + len('-uns-'):]):
+        return dict(core=name[m.end('uns') + len('-uns-'):], core_double_bonds=n_double_bonds)
+    family, rings, isomer = m['family'], m['rings'], m['isomer']
+    # unmodified core: the same isomer of ArchLips, a piece of package.json or another isomer of ArchLips
+    piece = 'GDGT5' if (family, rings.lower()) == ('GDGT', 'cren') else \
+        f'{family}-Cren' if rings.lower() == 'cren' else f'{family}{rings}'
+    candidates = [f'{family}-{rings}{isomer}', piece, f'{family}-{rings}', f'{family}-{rings.capitalize()}']
+    base = next((c for c in candidates if is_archlips_core(c) or c in ABBREVIATIONS), None)
+    if base is None:
+        raise NotSupported(f'core {name} missing')
+    # the label of the name identifies the isomer (it may refer to the position of the head group, e.g. Gly-2OH-GDD-2a)
+    return dict(core=base, core_double_bonds=n_double_bonds, core_methyls=_count(m['homo']),
+                core_hydroxy=_count(m['oh']), isomer=isomer or None)
 
 
 def parse(name: str) -> Lipid:
@@ -95,12 +114,8 @@ def parse(name: str) -> Lipid:
         return Lipid(core=QUINONE_MAP.get(m['cls'], m['cls']), core_chains=m['chains'], family='quinone')
     if m := TETRAETHER_NAME.match(name):
         heads = heads_of(m['head'])
-        core, n_double_bonds = tetraether_piece(m['core'])
         # isomers that are not in the core table (e.g. position of the head group in GDDs) keep their label
-        isomer = None
-        if not is_archlips_core(core) and (m_core := CORE_NAME.fullmatch(m['core'])):
-            isomer = m_core['isomer'] or None
-        return Lipid(tuple(heads), core, core_double_bonds=n_double_bonds, isomer=isomer,
+        return Lipid(tuple(heads), **tetraether_core(m['core']),
                      family='tetraether two heads' if len(heads) == 2 else 'tetraether')
     if ABBREVIATION_TO_GROUP.get(name) in CORE_GROUPS:
         return Lipid(core=name, family='carotenoid / other')
@@ -130,29 +145,32 @@ def _canonical_core_smiles(lipid: Lipid) -> str | None:
 
 def _species_tetraether_name(lipid: Lipid) -> str | None:
     """[<n>-uns-][Homo-<n>Me-][<n>OH-]<family>-<rings> without isomer suffix"""
-    core, n_double_bonds = lipid.core, lipid.core_double_bonds
+    core = lipid.core
+    n_double_bonds, n_methyls, n_hydroxy = lipid.core_double_bonds, lipid.core_methyls, lipid.core_hydroxy
     if is_archlips_core(core):
         m = CORE_NAME.fullmatch(core)
-        n_double_bonds += UNSATURATION.get(m['uns'], 0) if m['uns'] else 0
-        homo, oh, family, rings = m['homo'] or '', m['oh'] or '', m['family'], m['rings']
+        n_double_bonds += UNSATURATION[m['uns']] if m['uns'] else 0
+        n_methyls, n_hydroxy = n_methyls + _count(m['homo']), n_hydroxy + _count(m['oh'])
+        family, rings = m['family'], m['rings']
     elif is_block_core(core):
         family, chains = parse_block_core(core)
         if family not in TETRAETHER_FAMILIES:
             return None
         n_cp, n_ch = sum(c.n_cyclopentanes for c in chains), sum(c.n_cyclohexanes for c in chains)
-        n_oh = sum(c.n_hydroxy for c in chains)
+        n_hydroxy += sum(c.n_hydroxy for c in chains)
         n_double_bonds += sum(c.n_double_bonds for c in chains)
         if n_ch and (n_ch, n_cp) != (1, 4):
             return None
-        homo, oh, rings = '', {0: '', 1: 'OH-'}.get(n_oh, f'{n_oh}OH-'), 'Cren' if n_ch else str(n_cp)
+        rings = 'Cren' if n_ch else str(n_cp)
     elif m := TETRAETHER_PIECE.fullmatch(core):
-        homo, oh, family, rings = m['homo'] or '', m['oh'] or '', m['family'], m['rings']
-        if (family, rings) == ('GDGT', '5') and not homo and not oh:
+        family, rings = m['family'], m['rings']
+        if (family, rings) == ('GDGT', '5'):
             rings = 'Cren'  # the GDGT5 piece is crenarchaeol
     else:
         return None
-    uns = f'{UNSATURATION_PREFIX[n_double_bonds]}-uns-' if n_double_bonds else ''
-    return f'{uns}{homo}{oh}{family}-{rings}'
+    if n_double_bonds and n_double_bonds not in UNSATURATION_PREFIX:
+        return None
+    return f'{_modification_prefix(n_double_bonds, n_methyls, n_hydroxy)}{family}-{rings}'
 
 
 def tetraether_name(lipid: Lipid) -> str | None:
@@ -160,7 +178,7 @@ def tetraether_name(lipid: Lipid) -> str | None:
     if lipid.isomer and (species := _species_tetraether_name(lipid)) is not None:
         # ArchLips writes crenarchaeol isomers in lower case (GDD-crena)
         return species.replace('-Cren', '-cren') + lipid.isomer
-    if is_archlips_core(lipid.core) and not lipid.core_double_bonds:
+    if is_archlips_core(lipid.core) and not (lipid.core_double_bonds or lipid.core_methyls or lipid.core_hydroxy):
         return lipid.core
     smiles = _canonical_core_smiles(lipid)
     if smiles is not None and (name := _core_names_by_structure().get(smiles)):
@@ -178,14 +196,27 @@ def _default_isoprenoid_chains(core: str) -> str:
 
 
 def _archaeol_chains(lipid: Lipid) -> str | None:
-    if lipid.core in ARCHAEOL_CHAINS:
-        return lipid.core_chains or ARCHAEOL_CHAINS[lipid.core]
-    if is_block_core(lipid.core):
+    """Isoprenoid chains of archaeols in ArchLips notation, e.g. 20:0(OH)_25:0"""
+    if lipid.core == 'AR':
+        tokens = (lipid.core_chains or ARCHAEOL_CHAINS).split('_')
+    elif is_block_core(lipid.core):
         core_type, chains = parse_block_core(lipid.core)
         if core_type != 'AR' or any(c.n_cyclopentanes or c.n_cyclohexanes or c.n_hydroxy > 1 for c in chains):
             return None
-        return '_'.join(f'{c.n_carbons}:{c.n_double_bonds}' + ('(OH)' if c.n_hydroxy else '') for c in chains)
-    return None
+        tokens = [f'{c.n_carbons}:{c.n_double_bonds}' + ('(OH)' if c.n_hydroxy else '') for c in chains]
+    else:
+        return None
+    if lipid.core_methyls:
+        return None
+    # hydroxyl groups added by the rule: ArchLips lists the hydroxylated chains first
+    for _ in range(lipid.core_hydroxy):
+        free = [i for i, t in enumerate(tokens) if '(' not in t]
+        if not free:
+            return None
+        tokens[free[0]] += '(OH)'
+    if lipid.core_hydroxy:
+        tokens.sort(key=lambda t: '(OH)' not in t)
+    return '_'.join(tokens)
 
 
 def format_heads(heads: tuple[str, ...]) -> str:

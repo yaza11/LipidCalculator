@@ -358,3 +358,78 @@ def clear_chain_marks(mol: Mol) -> Mol:
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(0)
     return mol
+
+
+# ---------- modifications of ether-bound isoprenoid chains (hydroxyl and methyl groups) ----------
+# C3 of isoprenoid chains bound to an ether O (ether O, C1, C2, C3 with a methyl branch or ring), the polyol side does
+# not match because its carbon next to C1 is not a CH2, linear chains do not match because their C3 is not branched
+_C3_PATTERN = Chem.MolFromSmarts('[OD2]-[CH2]-[CH2]-[CX4;!H0;D3]')
+# C13 of a biphytanyl half: C11(Me), C12, C13, C14, C15(Me), C16 and C16' (center), C15'(Me)
+_C13_PATTERN = Chem.MolFromSmarts('[CX4](-[CH3])-[CH2]-[CH2;!r5;!r6]-[CH2]-[CX4](-[CH3])-[CH2]-[CH2]-[CX4]-[CH3]')
+# C13 of the half of H-shaped tetraethers (GMGTs) whose C15 methyl is the bridge to the other chain
+_C13_CROSSLINKED_PATTERN = Chem.MolFromSmarts('[CX4](-[CH3])-[CH2]-[CH2;!r5;!r6]-[CH2]-[CH1;!r5;!r6](-[CH2]-[CH1])')
+
+
+def _half_rank(mol: Mol, atom_idx: int, distances) -> tuple[int, int]:
+    """Order of the half chains: sn-2 (ether O at a secondary polyol carbon) before sn-3, then by polyol (atom map
+    number of its placeholder, the order of the head groups)"""
+    ethers = [a for a in mol.GetAtoms() if a.GetSymbol() == 'O' and a.GetDegree() == 2 and not _in_small_ring(a)]
+    o = min(ethers, key=lambda e: distances[atom_idx][e.GetIdx()])
+    polyol = [nb for nb in o.GetNeighbors() if distances[atom_idx][nb.GetIdx()] > distances[atom_idx][o.GetIdx()]]
+    if not polyol:
+        return 2, 0
+    carbon = polyol[0]
+    secondary = carbon.GetTotalNumHs() == 1
+    # placeholder of the polyol (sn-1 of glycerol) within 3 bonds
+    maps = [a.GetAtomMapNum() for a in mol.GetAtoms()
+            if a.GetSymbol() == 'Fr' and distances[carbon.GetIdx()][a.GetIdx()] <= 3]
+    return 0 if secondary else 1, min(maps, default=0)
+
+
+_HYDROXY_SITES: tuple[list[Mol], int] = ([_C3_PATTERN], 3)
+_METHYL_SITES: tuple[list[Mol], int] = ([_C13_PATTERN, _C13_CROSSLINKED_PATTERN], 3)
+
+
+def _sites(mol: Mol, patterns: list[Mol], position: int) -> set[int]:
+    return {match[position] for pattern in patterns for match in mol.GetSubstructMatches(pattern)}
+
+
+def n_hydroxy_positions(mol: Mol) -> int:
+    """Number of hydroxyl groups add_isoprenoid_hydroxy can add"""
+    return len(_sites(mol, *_HYDROXY_SITES))
+
+
+def n_methyl_positions(mol: Mol) -> int:
+    """Number of methyl groups add_isoprenoid_methyls can add"""
+    return len(_sites(mol, *_METHYL_SITES))
+
+
+def _add_groups(mol: Mol, n: int, patterns: list[Mol], position: int, element: int, name: str) -> Mol:
+    """Add n atoms of element (as OH or CH3) at the atom at position of the matches of patterns"""
+    if not n:
+        return mol
+    distances = Chem.GetDistanceMatrix(mol)
+    candidates = sorted(_sites(mol, patterns, position), key=lambda idx: (_half_rank(mol, idx, distances), idx))
+    if len(candidates) < n:
+        raise ValueError(f'could only place {len(candidates)} of {n} {name}')
+    rw = RWMol(mol)
+    for idx in candidates[:n]:
+        atom = rw.GetAtomWithIdx(idx)
+        atom.SetNumExplicitHs(0)
+        atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+        rw.AddBond(idx, rw.AddAtom(Chem.Atom(element)), Chem.BondType.SINGLE)
+    out = rw.GetMol()
+    Chem.SanitizeMol(out)
+    return out
+
+
+def add_isoprenoid_hydroxy(mol: Mol, n: int) -> Mol:
+    """Hydroxyl groups at C3 of the ether-bound isoprenoid chains (hydroxyarchaeols, OH-GDGTs, ...), sn-2 chains
+    first, then sn-3 chains, in the order of the polyols"""
+    return _add_groups(mol, n, *_HYDROXY_SITES, 8, 'hydroxyl group(s)')
+
+
+def add_isoprenoid_methyls(mol: Mol, n: int) -> Mol:
+    """Additional methyl groups at C13 of the biphytanyl half chains (Homo-Me-GDGTs, ...), sn-2 halves first, then
+    sn-3 halves, in the order of the polyols"""
+    return _add_groups(mol, n, *_METHYL_SITES, 6, 'methyl group(s)')
