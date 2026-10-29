@@ -24,6 +24,8 @@ from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import
 )
 from LipidCalculator.rdkit.plotting import mol_to_img
 from LipidCalculator.rdkit.util import mol_from_str
+from LipidCalculator.nomenclature import Lipid, standard_name
+from LipidCalculator.nomenclature.blocks import ipl_name
 from LipidCalculator.gui.common import (
     PAD, ADDUCTS, ResultTable, SearchCombobox, SendTargets, add_labeled, hill_formula, run_in_thread, send_buttons,
     show_error
@@ -121,24 +123,18 @@ def build_ipl(
         )
 
 
-UNSATURATION_PREFIXES: list[str] = ['', 'Mono', 'Di', 'Tri', 'Tetra', 'Penta', 'Hexa', 'Hepta', 'Octa']
-
-
-def ipl_name(head: str | None, core: str, chains: list[str], head2: str | None = None,
-             core_chains: str | None = None, core_double_bonds: int = 0) -> str:
-    """e.g. PE-AR(20:0_20:1), 2G-(PG-)Di-uns-GDGT0 or PC-DAG 34:1"""
-    name = core if not core_chains else f'{core}({core_chains})'
-    if core_double_bonds:
-        prefix = UNSATURATION_PREFIXES[core_double_bonds] if core_double_bonds < len(UNSATURATION_PREFIXES) \
-            else str(core_double_bonds)
-        name = f'{prefix}-uns-{name}'
-    if head2:
-        name = f'({head2}-){name}'
-    if head:
-        name = f'{head}-{name}'
-    if chains:
-        name += ' ' + '/'.join(chain[1:] for chain in chains)
-    return name
+def display_name(head: str | None, core: str, chains: list[str], head2: str | None = None,
+                 core_chains: str | None = None, core_double_bonds: int = 0) -> str:
+    """Standardized name (ArchLips for archaeal lipids, LIPID MAPS shorthand for others), the LipidCalculator name of
+    the building blocks if there is none"""
+    if head or not head2:
+        lipid = Lipid(tuple(h for h in (head, head2) if h), core, tuple(chains), core_chains=core_chains,
+                      core_double_bonds=core_double_bonds)
+        try:
+            return standard_name(lipid)
+        except Exception:
+            pass
+    return ipl_name(head, core, chains, head2=head2, core_chains=core_chains, core_double_bonds=core_double_bonds)
 
 
 class _StructureFrame(ttk.Frame):
@@ -336,8 +332,8 @@ class SingleIPLFrame(_StructureFrame):
         # only name the isoprenoid chains if they differ from the core
         if core_chains == isoprenoid_chains(core):
             core_chains = None
-        self.show_mol(mol, ipl_name(head, core, chains, head2=head2, core_chains=core_chains,
-                                    core_double_bonds=core_db))
+        self.show_mol(mol, display_name(head, core, chains, head2=head2, core_chains=core_chains,
+                                        core_double_bonds=core_db))
 
 
 BLOCK_CORE_TYPE_LABELS: list[str] = [f'{core_type}{SEP}{t.description}' for core_type, t in CORE_TYPES.items()]
@@ -456,7 +452,7 @@ class IsoprenoidBlocksFrame(_StructureFrame):
         except Exception as e:
             show_error(self, e, title='Could not build core')
             return
-        self.show_mol(mol, ipl_name(heads[0], core, [], head2=heads[1]))
+        self.show_mol(mol, display_name(heads[0], core, [], head2=heads[1]))
 
 
 class BatchIPLFrame(ttk.Frame):
@@ -566,11 +562,11 @@ class BatchIPLFrame(ttk.Frame):
                 try:
                     mol = build_ipl(head, core, chains)
                 except Exception:
-                    failed.append(ipl_name(head, core, chains))
+                    failed.append(display_name(head, core, chains))
                     continue
                 mass = ExactMolWt(mol)
                 rows.append(
-                    [ipl_name(head, core, chains), head or '', core,
+                    [display_name(head, core, chains), head or '', core,
                      '/'.join(chain[1:] for chain in chains),
                      rdMolDescriptors.CalcMolFormula(mol), f'{mass:.5f}']
                     + [f'{a.mass_to_mz(mass):.5f}' for a in adducts]

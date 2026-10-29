@@ -63,6 +63,7 @@ from LipidCalculator.compound_groups.intact_polar_lipids.pieces_from_json import
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_chains import modify_isoprenoid_chains, \
     clear_chain_marks, add_tetraether_double_bonds
 from LipidCalculator.compound_groups.intact_polar_lipids.isoprenoid_blocks import is_block_core, block_core_smiles
+from LipidCalculator.compound_groups.intact_polar_lipids.archlips_cores import is_archlips_core, archlips_core_smiles
 
 from LipidCalculator.rdkit.plotting import mplt_mol, plt_indices_bond
 from LipidCalculator.rdkit.util import add_indices, mol_from_str, get_combined
@@ -441,6 +442,9 @@ def get_struct(inpt: str | tuple[int, int]) -> str | None:
     elif is_block_core(inpt):
         # isoprenoid core build from isoprene units, e.g. GDGT(40:0_40:0(2cp)) or AR(20:0_25:0)
         return block_core_smiles(inpt)
+    elif inpt not in ABBREVIATIONS and is_archlips_core(inpt):
+        # tetraether core of the ArchLips library, e.g. GDGT-2a
+        return archlips_core_smiles(inpt)
     elif inpt not in ABBREVIATIONS:
         warnings.warn(f'structure with name {inpt} not found, returning None')
         return None
@@ -531,7 +535,7 @@ def ipl_automatic_bonds(
         is_chain_: list[bool] = [CHAIN_RE.fullmatch(name) is not None for name in names_]
         grps_: list[str] = [ABBREVIATION_TO_GROUP.get(name,
                                                       'chain' if _is_chain
-                                                      else 'core lipids' if is_block_core(name)
+                                                      else 'core lipids' if is_block_core(name) or is_archlips_core(name)
                                                       else None) for name, _is_chain in zip(names_, is_chain_)]
         assert sum(grp in CORE_GROUPS for grp in grps_) == 1, \
             f'automatic bonding only works with exactly one core unit but got {dict(zip(names_, grps_))}'
