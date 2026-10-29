@@ -50,14 +50,14 @@ def _piece_labels(groups: list[str]) -> list[str]:
 
 
 HEAD_LABELS: list[str] = [NO_HEAD] + _piece_labels(['head groups', 'functional groups'])
-BATCH_CORE_LABELS: list[str] = _piece_labels(['core lipids'])
 CORE_PIECES: list[str] = DATA_FRAME_IPL_PIECES[DATA_FRAME_IPL_PIECES.group == 'core lipids'].abbreviation.tolist()
 
 
-def _core_labels() -> list[str]:
-    """Cores, quinones and carotenoids, tetraethers by family (the number of rings and isomer are chosen separately)"""
+def _core_labels(groups: list[str] = CORE_GROUPS) -> list[str]:
+    """Cores (and quinones, carotenoids), tetraethers by family (the number of rings and isomer are chosen
+    separately)"""
     out = []
-    for label in _piece_labels(CORE_GROUPS):
+    for label in _piece_labels(groups):
         tetraether = tetraether_of(abbreviation(label))
         if tetraether is None:
             out.append(label)
@@ -155,6 +155,7 @@ def tetraether_rings(family: str) -> list[str]:
 
 
 CORE_LABELS: list[str] = _core_labels()
+BATCH_CORE_LABELS: list[str] = _core_labels(['core lipids'])
 
 
 def parse_chains(chains: str) -> list[str]:
@@ -732,6 +733,14 @@ class BatchIPLFrame(ttk.Frame):
         self.db_min_var = tk.StringVar(self, value='0')
         self.db_max_var = tk.StringVar(self, value='2')
         self.even_var = tk.BooleanVar(self, value=True)
+        # series of isoprenoid cores: (min, max) per property
+        self.iso_ranges: dict[str, tuple[tk.StringVar, tk.StringVar]] = {
+            key: (tk.StringVar(self, value=lo), tk.StringVar(self, value=hi))
+            for key, lo, hi in (('rings', '0', '8'), ('core_double_bonds', '0', '0'), ('core_hydroxy', '0', '0'),
+                                ('core_methyls', '0', '0'), ('archaeol_db', '0', '0'))
+        }
+        self.all_isomers_var = tk.BooleanVar(self, value=False)
+        self.archaeol_carbons_var = tk.StringVar(self, value='20, 25')
         self.status_var = tk.StringVar(self, value='Select head groups, cores and adducts, then press "Generate".')
         self._build()
 
@@ -777,6 +786,21 @@ class BatchIPLFrame(ttk.Frame):
         ttk.Checkbutton(ranges, text='Even carbon numbers only', variable=self.even_var).grid(
             row=2, column=0, columnspan=2, sticky='w', padx=PAD)
 
+        iso = ttk.LabelFrame(left, text='Isoprenoid cores (tetraethers, archaeol)', padding=PAD)
+        iso.pack(fill='x', pady=(0, PAD))
+        for row, (label, key) in enumerate([('Rings (crenarchaeol: 5)', 'rings'),
+                                            ('Biphytanyl double bonds', 'core_double_bonds'),
+                                            ('Hydroxyl groups', 'core_hydroxy'), ('Extra methyl groups', 'core_methyls'),
+                                            ('Archaeol double bonds per chain', 'archaeol_db')]):
+            frame = ttk.Frame(iso)
+            ttk.Entry(frame, textvariable=self.iso_ranges[key][0], width=6).pack(side='left')
+            ttk.Label(frame, text='to').pack(side='left', padx=PAD)
+            ttk.Entry(frame, textvariable=self.iso_ranges[key][1], width=6).pack(side='left')
+            add_labeled(iso, row, label, frame)
+        add_labeled(iso, 5, 'Archaeol chain C atoms', ttk.Entry(iso, textvariable=self.archaeol_carbons_var, width=14))
+        ttk.Checkbutton(iso, text='All regioisomers (otherwise the first per number of rings)',
+                        variable=self.all_isomers_var).grid(row=6, column=0, columnspan=2, sticky='w', padx=PAD)
+
         self.run_button = ttk.Button(left, text='Generate', command=self.run)
         self.run_button.pack(fill='x')
 
@@ -804,7 +828,56 @@ class BatchIPLFrame(ttk.Frame):
             raise ValueError('chain ranges must be whole numbers')
         chains = [f'C{c}:{db}' for c, db in product(c_range, db_range)
                   if (not self.even_var.get() or c % 2 == 0) and db <= c // 2]
-        return dict(heads=heads, cores=cores, adducts=adducts, chains=chains)
+        try:
+            iso = {key: range(int(lo.get()), int(hi.get()) + 1) for key, (lo, hi) in self.iso_ranges.items()}
+            archaeol_carbons = [int(c) for c in re.split(r'[,;\s]+', self.archaeol_carbons_var.get().strip()) if c]
+        except ValueError:
+            raise ValueError('the ranges of the isoprenoid cores must be whole numbers')
+        return dict(heads=heads, cores=cores, adducts=adducts, chains=chains, iso=iso,
+                    archaeol_carbons=archaeol_carbons, all_isomers=self.all_isomers_var.get())
+
+    @staticmethod
+    def _combinations(head: str | None, core: str, params: dict) -> list[dict]:
+        """Keyword arguments of build_ipl for one head group and core: chain compositions for cores with chains,
+        series of rings, isomers, double bonds, hydroxyl and methyl groups for tetraethers, chains for archaeols
+        (combinations the rules cannot place are left out)"""
+        iso = params['iso']
+        if takes_chains(core):
+            return [dict(head=head, core=core, chains=[chain]) for chain in params['chains']]
+        if core in TETRAETHER_FAMILIES:
+            cores = []
+            for rings in tetraether_rings(core):
+                if int(rings) not in iso['rings']:
+                    continue
+                isomers = tetraether_isomers().get((core, rings)) or [tetraether_piece(core, rings)]
+                cores += [i for i in (isomers if params['all_isomers'] else isomers[:1]) if i]
+            out = []
+            for c in cores:
+                n_hydroxy, n_methyls = max_core_hydroxy(c), max_core_methyls(c)
+                out += [dict(head=head, core=c, chains=[], core_double_bonds=db, core_hydroxy=oh, core_methyls=me)
+                        for db, oh, me in product(iso['core_double_bonds'], iso['core_hydroxy'], iso['core_methyls'])
+                        if oh <= n_hydroxy and me <= n_methyls]
+            return out
+        if core == 'AR':
+            # pairs of chains, each pair once (ArchLips does not distinguish the sn positions), hydroxyl groups at
+            # C3 as in ArchLips names (e.g. 20:1(OH)_20:0), on either chain if they differ
+            chains = sorted({f'{c}:{db}' for c in params['archaeol_carbons'] for db in iso['archaeol_db']
+                             if c % 5 == 0 and db <= c // 5}, key=lambda s: tuple(map(int, s.split(':'))))
+            out = []
+            for k, a in enumerate(chains):
+                for b in chains[k:]:
+                    for oh in iso['core_hydroxy']:
+                        variants = {0: [(a, b)], 1: [(f'{a}(OH)', b)] + ([(f'{b}(OH)', a)] if a != b else []),
+                                    2: [(f'{a}(OH)', f'{b}(OH)')]}.get(oh, [])
+                        out += [dict(head=head, core=core, chains=[], core_chains=f'{c1}_{c2}') for c1, c2 in variants]
+            return out
+        return [dict(head=head, core=core, chains=[])]
+
+    @staticmethod
+    def _modifications(combo: dict) -> str:
+        """e.g. '2 DB, 1 OH'"""
+        return ', '.join(f'{combo[key]} {label}' for key, label in (('core_double_bonds', 'DB'), ('core_hydroxy', 'OH'),
+                                                                    ('core_methyls', 'Me')) if combo.get(key))
 
     def run(self) -> None:
         try:
@@ -812,11 +885,8 @@ class BatchIPLFrame(ttk.Frame):
         except Exception as e:
             show_error(self, e)
             return
-        combos = [
-            (head, core, [chain] if takes_chains(core) else [])
-            for head, core in product(params['heads'], params['cores'])
-            for chain in (params['chains'] if takes_chains(core) else [None])
-        ]
+        combos = [combo for head, core in product(params['heads'], params['cores'])
+                  for combo in self._combinations(head, core, params)]
         if len(combos) > 20_000 and not messagebox.askyesno(
                 'Large batch', f'This generates {len(combos)} structures and may take a while. Continue?',
                 parent=self.winfo_toplevel()):
@@ -825,17 +895,20 @@ class BatchIPLFrame(ttk.Frame):
 
         def compute():
             rows, failed = [], []
-            for head, core, chains in combos:
+            for combo in combos:
+                head, core, chains = combo['head'], combo['core'], combo['chains']
+                modifications = {key: value for key, value in combo.items() if key not in ('head', 'core', 'chains')}
+                name = display_name(head, core, chains, **modifications)
                 try:
-                    mol = build_ipl(head, core, chains)
+                    mol = build_ipl(head, core, chains, **modifications)
                 except Exception:
-                    failed.append(display_name(head, core, chains))
+                    failed.append(name)
                     continue
                 mass = ExactMolWt(mol)
                 rows.append(
-                    [display_name(head, core, chains), head or '', core,
-                     '/'.join(chain[1:] for chain in chains),
-                     rdMolDescriptors.CalcMolFormula(mol), f'{mass:.5f}']
+                    [name, head or '', core,
+                     combo.get('core_chains') or '/'.join(chain[1:] for chain in chains),
+                     self._modifications(combo), rdMolDescriptors.CalcMolFormula(mol), f'{mass:.5f}']
                     + [f'{a.mass_to_mz(mass):.5f}' for a in adducts]
                     + [Chem.MolToSmiles(mol)]
                 )
@@ -844,9 +917,10 @@ class BatchIPLFrame(ttk.Frame):
         def done(result):
             rows, failed = result
             self.run_button.state(['!disabled'])
-            columns = ['Name', 'Head', 'Core', 'Chains', 'Formula', 'Mass'] + params['adducts'] + ['SMILES']
-            self.table.set_columns(columns, widths={'Name': 150, 'Head': 55, 'Core': 60, 'Chains': 60,
-                                                    'Formula': 130, 'SMILES': 300})
+            columns = ['Name', 'Head', 'Core', 'Chains', 'Modifications', 'Formula', 'Mass'] + params['adducts'] \
+                + ['SMILES']
+            self.table.set_columns(columns, widths={'Name': 150, 'Head': 55, 'Core': 70, 'Chains': 80,
+                                                    'Modifications': 90, 'Formula': 130, 'SMILES': 300})
             self.table.set_rows(rows)
             msg = f'Generated {len(rows)} IPLs.'
             if failed:
