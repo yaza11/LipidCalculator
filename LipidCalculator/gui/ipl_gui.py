@@ -154,8 +154,68 @@ def tetraether_rings(family: str) -> list[str]:
     return sorted(rings, key=int)
 
 
-CORE_LABELS: list[str] = _core_labels()
-BATCH_CORE_LABELS: list[str] = _core_labels(['core lipids'])
+@lru_cache(maxsize=None)
+def piece_mass(piece: str) -> float:
+    """Monoisotopic mass of a building block without placeholders (tetraether families: the core without rings)"""
+    if piece in TETRAETHER_FAMILIES:
+        piece = tetraether_piece(piece, '0') or f'{piece}-0'
+    try:
+        return ExactMolWt(remove_placeholder_atoms(mol_from_str(get_struct(piece))))
+    except Exception:
+        return float('inf')
+
+
+def _by_mass(labels: list[str]) -> list[str]:
+    return sorted(labels, key=lambda label: piece_mass(abbreviation(label)))
+
+
+def _is_sterol(label: str) -> bool:
+    return abbreviation(label).startswith(('ST ', 'SE '))
+
+
+HEAD_LABELS = [NO_HEAD] + _by_mass(HEAD_LABELS[1:])
+_LIPID_CORE_LABELS: list[str] = _core_labels(['core lipids'])
+# core lists by class, each sorted by mass
+CORE_CLASSES: dict[str, list[str]] = {
+    'Lipid cores': _by_mass([label for label in _LIPID_CORE_LABELS if not _is_sterol(label)]),
+    'Sterols': _by_mass([label for label in _LIPID_CORE_LABELS if _is_sterol(label)]),
+    'Quinones': _by_mass(_piece_labels(['quinones'])),
+    'Carotenoids': _by_mass(_piece_labels(['carotenoids'])),
+}
+CORE_LABELS: list[str] = [label for labels in CORE_CLASSES.values() for label in labels]
+DEFAULT_CORE_LABEL: str = next(label for label in CORE_LABELS if abbreviation(label) == 'AR')
+
+
+def core_class(label: str) -> str:
+    return next((cls for cls, labels in CORE_CLASSES.items() if label in labels), 'Lipid cores')
+
+
+@lru_cache(maxsize=None)
+def n_attachments(core: str) -> int:
+    """Number of head groups the core takes (placeholders for head groups)"""
+    try:
+        return sum(a.GetSymbol() == 'Fr' for a in mol_from_str(get_struct(core)).GetAtoms())
+    except Exception:
+        return 0
+
+
+def _labeled(parent: tk.Misc, row: int, label: str, widget: tk.Widget, column: int = 0) -> tk.Widget:
+    """add_labeled, the label is kept with the widget to hide both"""
+    add_labeled(parent, row, label, widget, column=column)
+    widget.label = parent.grid_slaves(row=row, column=column)[0]
+    return widget
+
+
+def _show(widget: tk.Widget, visible: bool) -> None:
+    """Show or hide a gridded widget (and its label), hidden widgets keep their grid options"""
+    for w in (widget, getattr(widget, 'label', None)):
+        if w is not None:
+            w.grid() if visible else w.grid_remove()
+    widget.visible = visible
+
+
+def _visible(widget: tk.Widget) -> bool:
+    return getattr(widget, 'visible', True)
 
 
 def parse_chains(chains: str) -> list[str]:
@@ -398,8 +458,9 @@ class SingleIPLFrame(_StructureFrame):
 
     def __init__(self, master, send_targets: SendTargets = None, **kwargs):
         super().__init__(master, **kwargs)
-        self.head_var = tk.StringVar(self, value=next(l for l in HEAD_LABELS if l.startswith('PC')))
-        self.core_var = tk.StringVar(self, value=next(l for l in CORE_LABELS if l.startswith('DAG')))
+        self.head_var = tk.StringVar(self, value=NO_HEAD)
+        self.core_class_var = tk.StringVar(self, value=core_class(DEFAULT_CORE_LABEL))
+        self.core_var = tk.StringVar(self, value=DEFAULT_CORE_LABEL)
         self.chains_var = tk.StringVar(self, value='34:1')
         self.head2_var = tk.StringVar(self, value=NO_HEAD)
         self.core_chains_var = tk.StringVar(self, value='')
@@ -429,57 +490,68 @@ class SingleIPLFrame(_StructureFrame):
 
         inputs = ttk.LabelFrame(left, text='Building blocks', padding=PAD)
         inputs.pack(fill='x')
-        # typing shows the matching entries
-        for row, (label, var) in enumerate([('Head group', self.head_var), ('Head group 2', self.head2_var)]):
-            add_labeled(inputs, row, label, SearchCombobox(inputs, textvariable=var, values=HEAD_LABELS, width=34))
-        self.core_cb = add_labeled(inputs, 2, 'Core', SearchCombobox(inputs, textvariable=self.core_var,
-                                                                     values=CORE_LABELS, width=34))
-        self.core_chains_entry = add_labeled(inputs, 3, 'Isoprenoid chains',
-                                             ttk.Entry(inputs, textvariable=self.core_chains_var))
-        ttk.Label(inputs, textvariable=self.core_chains_hint_var, foreground='gray', justify='left',
-                  wraplength=320).grid(row=4, column=0, columnspan=2, sticky='w', padx=PAD)
+        # cores are chosen by class (lipid cores, sterols, quinones, carotenoids), sorted by mass
+        class_cb = _labeled(inputs, 0, 'Core class', ttk.Combobox(inputs, textvariable=self.core_class_var,
+                                                                  values=list(CORE_CLASSES), state='readonly', width=34))
+        class_cb.bind('<<ComboboxSelected>>', lambda _: self._set_core_class())
+        self.core_cb = _labeled(inputs, 1, 'Core', SearchCombobox(inputs, textvariable=self.core_var,
+                                                                  values=CORE_CLASSES[self.core_class_var.get()],
+                                                                  width=34))
+        # typing shows the matching entries, head groups are shown if the core has attachment points for them
+        self.head_cbs: list[SearchCombobox] = [
+            _labeled(inputs, row, label, SearchCombobox(inputs, textvariable=var, values=HEAD_LABELS, width=34))
+            for row, (label, var) in enumerate([('Head group', self.head_var), ('Head group 2', self.head2_var)], 2)
+        ]
+        self.core_chains_entry = _labeled(inputs, 4, 'Isoprenoid chains',
+                                          ttk.Entry(inputs, textvariable=self.core_chains_var))
+        self.core_chains_hint = ttk.Label(inputs, textvariable=self.core_chains_hint_var, foreground='gray',
+                                          justify='left', wraplength=320)
+        self.core_chains_hint.grid(row=5, column=0, columnspan=2, sticky='w', padx=PAD)
         # modifications of the isoprenoid chains of the core, placed by rules (see isoprenoid_chains.py)
         modifications = ttk.Frame(inputs)
-        modifications.grid(row=5, column=0, columnspan=2, sticky='w')
-        self.core_db_entry = add_labeled(modifications, 0, 'Double bonds',
-                                         ttk.Spinbox(modifications, from_=0, to=8, textvariable=self.core_db_var,
-                                                     width=4))
-        self.core_oh_entry = add_labeled(modifications, 0, 'OH', column=2,
-                                         widget=ttk.Spinbox(modifications, from_=0, to=4, textvariable=self.core_oh_var,
-                                                            width=4))
-        self.core_me_entry = add_labeled(modifications, 0, 'Me', column=4,
-                                         widget=ttk.Spinbox(modifications, from_=0, to=4, textvariable=self.core_me_var,
-                                                            width=4))
-        self.rings_cb = add_labeled(modifications, 1, 'Rings',
-                                    ttk.Combobox(modifications, textvariable=self.rings_var, state='readonly', width=5))
-        self.isomer_cb = add_labeled(modifications, 1, 'Isomer', column=2,
-                                     widget=ttk.Combobox(modifications, textvariable=self.isomer_var, state='readonly',
-                                                         width=14))
+        modifications.grid(row=6, column=0, columnspan=2, sticky='w')
+        self.rings_cb = _labeled(modifications, 0, 'Rings',
+                                 ttk.Combobox(modifications, textvariable=self.rings_var, state='readonly', width=5))
+        self.isomer_cb = _labeled(modifications, 0, 'Isomer', column=2,
+                                  widget=ttk.Combobox(modifications, textvariable=self.isomer_var, state='readonly',
+                                                      width=14))
         self.isomer_cb.grid_configure(columnspan=3, sticky='w')
         self.rings_cb.bind('<<ComboboxSelected>>', lambda _: self._update_isomers())
-        self.chains_entry = add_labeled(inputs, 6, 'Chains (C:DB)', ttk.Entry(inputs, textvariable=self.chains_var))
-        ttk.Label(
+        self.core_db_entry = _labeled(modifications, 1, 'Double bonds',
+                                      ttk.Spinbox(modifications, from_=0, to=8, textvariable=self.core_db_var, width=4))
+        self.core_oh_entry = _labeled(modifications, 1, 'OH', column=2,
+                                      widget=ttk.Spinbox(modifications, from_=0, to=4, textvariable=self.core_oh_var,
+                                                         width=4))
+        self.core_me_entry = _labeled(modifications, 1, 'Me', column=4,
+                                      widget=ttk.Spinbox(modifications, from_=0, to=4, textvariable=self.core_me_var,
+                                                         width=4))
+        self.modifications_hint = ttk.Label(
+            inputs, foreground='gray', justify='left', wraplength=320,
+            text='Double bonds Δ2, Δ6, ... of the biphytanyl chains, hydroxyl groups at C3 (sn-2 chains first), '
+                 'additional methyl groups at C13 of the biphytanyl chains. Regioisomers of the ArchLips library.')
+        self.modifications_hint.grid(row=7, column=0, columnspan=2, sticky='w', padx=PAD)
+        self.chains_entry = _labeled(inputs, 8, 'Chains (C:DB)', ttk.Entry(inputs, textvariable=self.chains_var))
+        self.chains_hint = ttk.Label(
             inputs, foreground='gray', justify='left', wraplength=320,
             text='Chains separated by _ or /, e.g. 16:0_18:1 or 18:1/16:0;(2OH) (hydroxyl groups: ;(2OH), ;O). '
                  'Chain lengths include the C atoms of the core. A single total composition (e.g. 34:1) is split '
                  'between two chains. Chains go to the core first, then to head groups with chains (e.g. Acyl for '
                  'TG). Head group 2 is bonded to the second attachment point of the core (other glycerol of '
-                 'tetraethers, 3-OH of ceramides). Isoprenoid cores take double bonds (Δ2, Δ6, ... of the '
-                 'biphytanyl chains), hydroxyl groups (C3, sn-2 chains first) and additional methyl groups (C13 of '
-                 'the biphytanyl chains), e.g. OH-GDGT-0 or Homo-Me-GDGT-0. Tetraethers can be switched between '
-                 'numbers of rings and the regioisomers of the ArchLips library (e.g. GDGT-2a, GDGT-2b).'
-        ).grid(row=7, column=0, columnspan=2, sticky='w', padx=PAD)
+                 'tetraethers, 3-OH of ceramides).')
+        self.chains_hint.grid(row=9, column=0, columnspan=2, sticky='w', padx=PAD)
 
         opts = ttk.LabelFrame(left, text='Options', padding=PAD)
         opts.pack(fill='x', pady=PAD)
-        # options of the chains, disabled together with the chains field
+        # options of the chains, shown together with the chains field
+        self.chain_options_frame = ttk.Frame(opts)
+        self.chain_options_frame.pack(anchor='w')
         self.chain_options: list[ttk.Checkbutton] = [
-            ttk.Checkbutton(opts, text='Split single chain into two', variable=self.split_var),
-            ttk.Checkbutton(opts, text='Longest chain first', variable=self.sort_var),
+            ttk.Checkbutton(self.chain_options_frame, text='Split single chain into two', variable=self.split_var),
+            ttk.Checkbutton(self.chain_options_frame, text='Longest chain first', variable=self.sort_var),
         ]
         for check in self.chain_options:
             check.pack(anchor='w')
-        draw = ttk.Frame(opts)
+        draw = self.draw_frame = ttk.Frame(opts)
         draw.pack(anchor='w', pady=(PAD, 0))
         ttk.Label(draw, text='Draw').pack(side='left')
         view_cb = ttk.Combobox(draw, textvariable=self.view_var, values=VIEWS, state='readonly', width=13)
@@ -498,12 +570,26 @@ class SingleIPLFrame(_StructureFrame):
         self._cancel_build()
         self.build()
 
+    def _set_core_class(self) -> None:
+        """Show the cores of the selected class, the first one is selected"""
+        labels = CORE_CLASSES[self.core_class_var.get()]
+        self.core_cb.configure(values=labels)
+        if self.core_var.get() not in labels:
+            self.core_var.set(DEFAULT_CORE_LABEL if DEFAULT_CORE_LABEL in labels else labels[0])
+
     def _update_chain_state(self, keep_values: bool = False) -> None:
+        """Show the fields that apply to the selected building blocks (keep_values: only the chains depend on the
+        head groups, otherwise the fields of a new core are reset)"""
         core = abbreviation(self.core_var.get())
-        pieces = [core, abbreviation(self.head_var.get()), abbreviation(self.head2_var.get())]
-        takes = ['!disabled'] if any(p and takes_chains(p) for p in pieces) else ['disabled']
-        for widget in (self.chains_entry, *self.chain_options):
-            widget.state(takes)
+        heads = [abbreviation(var.get()) if _visible(cb) else None
+                 for var, cb in zip((self.head_var, self.head2_var), self.head_cbs)]
+        takes = any(p and takes_chains(p) for p in [core, *heads])
+        _show(self.chains_entry, takes)
+        self.chains_hint.grid() if takes else self.chains_hint.grid_remove()
+        if takes:
+            self.chain_options_frame.pack(anchor='w', before=self.draw_frame)
+        else:
+            self.chain_options_frame.pack_forget()
         if keep_values:
             return
         self._state_core = core
@@ -515,21 +601,31 @@ class SingleIPLFrame(_StructureFrame):
         self._tetraether_family = tetraether[0] if tetraether else None
         self.rings_cb.configure(values=tetraether_rings(tetraether[0]) if tetraether else [])
         self.rings_var.set(tetraether[1] if tetraether else '')
-        self.rings_cb.state(['!disabled'] if tetraether else ['disabled'])
+        _show(self.rings_cb, bool(tetraether))
         self._update_isomers()
         core = self._core()
         known = core in ABBREVIATIONS or is_archlips_core(core)
-        self.core_db_entry.state(['!disabled'] if known and takes_core_double_bonds(core) else ['disabled'])
+        # head groups that the core can take
+        n_heads = n_attachments(core) if known else 0
+        for k, head_cb in enumerate(self.head_cbs):
+            _show(head_cb, k < n_heads)
+        _show(self.core_db_entry, known and takes_core_double_bonds(core))
         self.core_db_var.set(0)
         for entry, var, maximum in ((self.core_oh_entry, self.core_oh_var, max_core_hydroxy),
                                     (self.core_me_entry, self.core_me_var, max_core_methyls)):
             n = maximum(core) if known else 0
             entry.configure(to=max(n, 1))
-            entry.state(['!disabled'] if n else ['disabled'])
+            _show(entry, bool(n))
             var.set(0)
+        any_modification = any(_visible(w) for w in (self.rings_cb, self.core_db_entry, self.core_oh_entry,
+                                                      self.core_me_entry))
+        self.modifications_hint.grid() if any_modification else self.modifications_hint.grid_remove()
         chains = isoprenoid_chains(core) if known else ''
         self.core_chains_var.set(chains)
-        self.core_chains_entry.state(['!disabled'] if chains else ['disabled'])
+        _show(self.core_chains_entry, bool(chains))
+        self.core_chains_hint.grid() if chains else self.core_chains_hint.grid_remove()
+        # head groups may have changed the chains field
+        self._update_chain_state(keep_values=True)
         if not chains:
             self.core_chains_hint_var.set('')
         elif core in CHAINS_IN_ISOPRENE_UNITS:
@@ -565,7 +661,7 @@ class SingleIPLFrame(_StructureFrame):
             if self._tetraether_family else []
         self.isomer_cb.configure(values=isomers)
         self.isomer_var.set(isomers[0] if isomers else '')
-        self.isomer_cb.state(['!disabled'] if isomers else ['disabled'])
+        _show(self.isomer_cb, bool(isomers))
 
     def _core(self) -> str:
         """Core to build: the selected isomer of tetraethers, otherwise the selected core piece"""
@@ -577,17 +673,18 @@ class SingleIPLFrame(_StructureFrame):
         return tetraether_piece(self._tetraether_family, self.rings_var.get()) or core
 
     def _read_chains(self, core: str) -> list[str]:
-        if self.chains_entry.instate(['disabled']):
+        if not _visible(self.chains_entry):
             return []
         return parse_chains(self.chains_var.get())
 
     def build(self) -> None:
-        head = abbreviation(self.head_var.get())
-        head2 = abbreviation(self.head2_var.get())
+        # hidden fields do not apply to the core
+        head, head2 = [abbreviation(var.get()) if _visible(cb) else None
+                       for var, cb in zip((self.head_var, self.head2_var), self.head_cbs)]
         core = self._core()
-        core_chains = self.core_chains_var.get().strip() or None
+        core_chains = (self.core_chains_var.get().strip() or None) if _visible(self.core_chains_entry) else None
         try:
-            modifications = {key: int(var.get()) if entry.instate(['!disabled']) else 0
+            modifications = {key: int(var.get()) if _visible(entry) else 0
                              for key, var, entry in (('core_double_bonds', self.core_db_var, self.core_db_entry),
                                                      ('core_hydroxy', self.core_oh_var, self.core_oh_entry),
                                                      ('core_methyls', self.core_me_var, self.core_me_entry))}
@@ -645,17 +742,19 @@ class IsoprenoidBlocksFrame(_StructureFrame):
         type_cb = add_labeled(inputs, 0, 'Type', ttk.Combobox(inputs, textvariable=self.type_var, state='readonly',
                                                               values=BLOCK_CORE_TYPE_LABELS, width=34))
         type_cb.bind('<<ComboboxSelected>>', lambda _: self._update_chain_state(set_defaults=True))
-        self.head_cbs: list[SearchCombobox] = []
-        for row, (label, var) in enumerate([('Head group 1', self.head_var), ('Head group 2', self.head2_var)], 1):
-            self.head_cbs.append(add_labeled(inputs, row, label, SearchCombobox(inputs, textvariable=var,
-                                                                                values=HEAD_LABELS, width=34)))
+        self.head_cbs: list[SearchCombobox] = [
+            _labeled(inputs, row, label, SearchCombobox(inputs, textvariable=var, values=HEAD_LABELS, width=34))
+            for row, (label, var) in enumerate([('Head group 1', self.head_var), ('Head group 2', self.head2_var)], 1)
+        ]
 
         chains = ttk.LabelFrame(left, text='Chains', padding=PAD)
         chains.pack(fill='x', pady=PAD)
         ttk.Label(chains, textvariable=self.layout_hint_var, justify='left', wraplength=320).grid(
             row=0, column=0, columnspan=MAX_BLOCK_CHAINS + 1, sticky='w', padx=PAD)
+        self.chain_headers: list[ttk.Label] = []
         for col in range(MAX_BLOCK_CHAINS):
-            ttk.Label(chains, text=f'Chain {col + 1}').grid(row=1, column=col + 1, padx=PAD)
+            self.chain_headers.append(ttk.Label(chains, text=f'Chain {col + 1}'))
+            self.chain_headers[-1].grid(row=1, column=col + 1, padx=PAD)
         # spinboxes per chain
         self.chain_spinboxes: list[list[ttk.Spinbox]] = [[] for _ in range(MAX_BLOCK_CHAINS)]
         for row, (label, attr, _, maximum) in enumerate(BLOCK_CHAIN_FIELDS, 2):
@@ -685,9 +784,9 @@ class IsoprenoidBlocksFrame(_StructureFrame):
         core_type = self._core_type()
         layout = CORE_TYPES[core_type]
         n_chains = len(layout.chains)
-        for k, spinboxes in enumerate(self.chain_spinboxes):
-            for spinbox in spinboxes:
-                spinbox.state(['!disabled'] if k < n_chains else ['disabled'])
+        for k, (header, spinboxes) in enumerate(zip(self.chain_headers, self.chain_spinboxes)):
+            for widget in (header, *spinboxes):
+                _show(widget, k < n_chains)
         # only regular alkanes can be shortened by single C atoms
         for spinbox in self.carbon_spinboxes:
             spinbox.configure(increment=1 if core_type == 'HT' else ISOPRENE_CARBONS)
@@ -697,7 +796,7 @@ class IsoprenoidBlocksFrame(_StructureFrame):
         # hydrocarbons take no head groups, cores with OH groups or polyols take up to two
         n_attachments = len(layout.polyols) + sum(a == 'OH' for c in layout.chains for a in c.anchors)
         for k, head_cb in enumerate(self.head_cbs):
-            head_cb.state(['!disabled'] if k < n_attachments else ['disabled'])
+            _show(head_cb, k < n_attachments)
         self.layout_hint_var.set(', '.join(f'{k + 1}: {c.description}' for k, c in enumerate(layout.chains)))
 
     def core_spec(self) -> str:
@@ -711,7 +810,7 @@ class IsoprenoidBlocksFrame(_StructureFrame):
         return format_block_core(core_type, chains)
 
     def build(self) -> None:
-        heads = [abbreviation(var.get()) if cb.instate(['!disabled']) else None
+        heads = [abbreviation(var.get()) if _visible(cb) else None
                  for var, cb in zip((self.head_var, self.head2_var), self.head_cbs)]
         try:
             core = self.core_spec()
@@ -742,7 +841,11 @@ class BatchIPLFrame(ttk.Frame):
         self.all_isomers_var = tk.BooleanVar(self, value=False)
         self.archaeol_carbons_var = tk.StringVar(self, value='20, 25')
         self.status_var = tk.StringVar(self, value='Select head groups, cores and adducts, then press "Generate".')
+        # cores are listed by class, the selection is kept when switching between classes
+        self.core_class_var = tk.StringVar(self, value=core_class(DEFAULT_CORE_LABEL))
+        self._core_selection: set[str] = {abbreviation(DEFAULT_CORE_LABEL)}
         self._build()
+        self._update_sections()
 
     @staticmethod
     def _listbox(parent, values: list[str], selected: list[str], height: int = 10) -> tk.Listbox:
@@ -765,16 +868,22 @@ class BatchIPLFrame(ttk.Frame):
         lists = ttk.Frame(left)
         lists.pack(fill='both', expand=True)
         for col, (title, attr, values, selected) in enumerate([
-            ('Head groups', 'heads_lb', HEAD_LABELS, ['PC', 'PE', 'PG']),
-            ('Cores', 'cores_lb', BATCH_CORE_LABELS, ['DAG']),
+            ('Head groups', 'heads_lb', HEAD_LABELS, [NO_HEAD]),
+            ('Cores', 'cores_lb', CORE_CLASSES[self.core_class_var.get()], self._core_selection),
             ('Adducts', 'adducts_lb', ADDUCTS, DEFAULT_BATCH_ADDUCTS),
         ]):
             lf = ttk.LabelFrame(lists, text=title, padding=PAD)
             lf.grid(row=0, column=col, sticky='nsew', padx=(0, PAD))
+            if attr == 'cores_lb':
+                class_cb = ttk.Combobox(lf, textvariable=self.core_class_var, values=list(CORE_CLASSES),
+                                        state='readonly', width=28)
+                class_cb.pack(fill='x', pady=(0, PAD))
+                class_cb.bind('<<ComboboxSelected>>', lambda _: self._set_core_class())
             setattr(self, attr, self._listbox(lf, values, selected))
+        self.cores_lb.bind('<<ListboxSelect>>', lambda _: (self._sync_core_selection(), self._update_sections()))
         lists.rowconfigure(0, weight=1)
 
-        ranges = ttk.LabelFrame(left, text='Total chain composition', padding=PAD)
+        ranges = self.chain_section = ttk.LabelFrame(left, text='Total chain composition', padding=PAD)
         ranges.pack(fill='x', pady=PAD)
         for row, (label, v_min, v_max) in enumerate([('Carbon atoms', self.c_min_var, self.c_max_var),
                                                      ('Double bonds', self.db_min_var, self.db_max_var)]):
@@ -786,7 +895,8 @@ class BatchIPLFrame(ttk.Frame):
         ttk.Checkbutton(ranges, text='Even carbon numbers only', variable=self.even_var).grid(
             row=2, column=0, columnspan=2, sticky='w', padx=PAD)
 
-        iso = ttk.LabelFrame(left, text='Isoprenoid cores (tetraethers, archaeol)', padding=PAD)
+        iso = self.isoprenoid_section = ttk.LabelFrame(left, text='Isoprenoid cores (tetraethers, archaeol)',
+                                                       padding=PAD)
         iso.pack(fill='x', pady=(0, PAD))
         for row, (label, key) in enumerate([('Rings (crenarchaeol: 5)', 'rings'),
                                             ('Biphytanyl double bonds', 'core_double_bonds'),
@@ -815,9 +925,37 @@ class BatchIPLFrame(ttk.Frame):
     def _selected(lb: tk.Listbox) -> list[str]:
         return [lb.get(i) for i in lb.curselection()]
 
+    def _sync_core_selection(self) -> None:
+        """Selection of the listed class into the selection of all classes"""
+        listed = {abbreviation(self.cores_lb.get(i)) for i in range(self.cores_lb.size())}
+        self._core_selection = (self._core_selection - listed) | {abbreviation(c) for c in self._selected(self.cores_lb)}
+
+    def _set_core_class(self) -> None:
+        self._sync_core_selection()
+        self.cores_lb.delete(0, 'end')
+        for idx, label in enumerate(CORE_CLASSES[self.core_class_var.get()]):
+            self.cores_lb.insert('end', label)
+            if abbreviation(label) in self._core_selection:
+                self.cores_lb.selection_set(idx)
+
+    def _selected_cores(self) -> list[str]:
+        """Selected cores of all classes, in the order of the lists"""
+        self._sync_core_selection()
+        return [abbreviation(label) for label in CORE_LABELS if abbreviation(label) in self._core_selection]
+
+    def _update_sections(self) -> None:
+        """Show the ranges that apply to the selected cores"""
+        cores = self._selected_cores()
+        for section, visible in ((self.chain_section, any(takes_chains(c) for c in cores)),
+                                 (self.isoprenoid_section, any(c in TETRAETHER_FAMILIES or c == 'AR' for c in cores))):
+            if visible:
+                section.pack(fill='x', pady=(0, PAD), before=self.run_button)
+            else:
+                section.pack_forget()
+
     def _read_inputs(self) -> dict:
         heads = [abbreviation(h) for h in self._selected(self.heads_lb)]
-        cores = [abbreviation(c) for c in self._selected(self.cores_lb)]
+        cores = self._selected_cores()
         adducts = self._selected(self.adducts_lb)
         if not heads or not cores:
             raise ValueError('select at least one head group (or "(none)") and one core')
