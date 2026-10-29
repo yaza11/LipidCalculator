@@ -2,8 +2,6 @@ import pandas as pd
 
 from LipidCalculator.compound_creation.formula_parser import CompoundDict
 
-MASS_PROTON = 'H+'
-
 # map compound group to common fragments & losses (positive ion mode)
 # fragments are m/z of singly charged ions, losses are neutral masses
 # keys use the abbreviations from package.json, '<head>-<core>' if the value depends on the core lipid

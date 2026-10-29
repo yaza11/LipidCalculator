@@ -668,6 +668,34 @@
       "SMILES": "[Fr]OCC1COCCC(C)CCCC2CCC(C2)C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCOCC(CO[Fr])OCCC(C)CCCC3CCC(C3)C3CCCC(C)(CCC(C)CCCC(C)C4CCC(CCCC(C)CCO1)C4)C3)C2"
     },
     {
+      "abbreviation": "BPD0",
+      "name": "Biphytanyl diol (acyclic)",
+      "SMILES": "CC(CCCC(C)CCCC(C)CCC(C)CCCC(C)CCCC(C)CCCC(C)CCO[Fr])CCCC(C)CCO[Fr]",
+      "formula": "C40H82O2",
+      "notes": "same as BPD(40:0) from isoprenoid_blocks.py"
+    },
+    {
+      "abbreviation": "BPD1",
+      "name": "Biphytanyl diol (1 cyclopentane ring)",
+      "SMILES": "CC(CCCC(C)CCCC(C)CCC(C)CCCC(C)C1CCC(CCCC(C)CCO[Fr])C1)CCCC(C)CCO[Fr]",
+      "formula": "C40H80O2",
+      "notes": "same as BPD(40:0(cp)) from isoprenoid_blocks.py"
+    },
+    {
+      "abbreviation": "BPD2",
+      "name": "Biphytanyl diol (2 cyclopentane rings)",
+      "SMILES": "CC(CCCC1CCC(C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(CCCC(C)CCO[Fr])C2)C1)CCO[Fr]",
+      "formula": "C40H78O2",
+      "notes": "same as BPD(40:0(2cp)) from isoprenoid_blocks.py"
+    },
+    {
+      "abbreviation": "BPD3",
+      "name": "Biphytanyl diol (3 cyclopentane rings)",
+      "SMILES": "CC(CCCC1CCC(C(C)CCCC(C)CCC(C)CCCC(C)C2CCC(C3CCC(CCO[Fr])C3)C2)C1)CCO[Fr]",
+      "formula": "C40H76O2",
+      "notes": "same as BPD(40:0(3cp)) from isoprenoid_blocks.py"
+    },
+    {
       "abbreviation": "AR",
       "name": "Archaeol",
       "SMILES": "CC(C)CCCC(C)CCCC(C)CCCC(C)CCOCC(CO[Fr])OCCC(C)CCCC(C)CCCC(C)CCCC(C)C"

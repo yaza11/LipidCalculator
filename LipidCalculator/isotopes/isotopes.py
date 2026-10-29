@@ -122,3 +122,7 @@ def isotope_mass(element: str, monoisotopic: bool = True) -> float:
             'cannot specify isotope when not using monoisotopic elements'
         isos = get_all_isotopes(element)
         return sum([iso.mass * iso.ratio for iso in isos])
+
+
+if __name__ == '__main__':
+    iso_interest = isotope_properties.loc[isotope_properties.Element.isin(['C', 'H', 'N', 'O', 'P', 'S']), :].copy()
